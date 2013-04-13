@@ -1,5 +1,5 @@
 This is a generic "main" to be used with
-usitwislave, it allows to receive various
+v-usb, it allows to receive various
 commands (see commands file) (mostly one
 byte) and have various inputs, outputs,
 counters, pwm's and adc's to be controlled.
