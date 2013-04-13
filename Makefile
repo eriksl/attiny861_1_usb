@@ -2,13 +2,13 @@ MCU			=		attiny861
 PROGRAMMER	=		dragon_isp
 PRGFLAGS	=		-b 0 -P usb
 
-PROGRAM		=		twimain
-OBJFILES	=		adc.o ioports.o timer0.o pwm_timer1.o watchdog.o usitwislave/usitwislave.o $(PROGRAM).o
-HEADERS		=		adc.h ioports.h timer0.h pwm_timer1.h watchdog.h usitwislave/usitwislave_devices.h usitwislave/usitwislave.h
+PROGRAM		=		main
+OBJFILES	=		adc.o ioports.o timer0.o pwm_timer1.o watchdog.o $(PROGRAM).o
+HEADERS		=		adc.h ioports.h timer0.h pwm_timer1.h watchdog.h
 HEXFILE		=		$(PROGRAM).hex
 ELFFILE		=		$(PROGRAM).elf
 PROGRAMMED	=		.programmed
-CFLAGS		=		-Wall -Winline -O3 -mmcu=$(MCU) -DF_CPU=8000000UL -Iusitwislave -DUSI_ON_PORT_A \
+CFLAGS		=		-Wall -Winline -O3 -mmcu=$(MCU) -DF_CPU=8000000UL \
 					-fpack-struct -funroll-loops -funit-at-a-time -fno-keep-static-consts \
 					-frename-registers
 LDFLAGS		=		-Wall -mmcu=$(MCU)
@@ -31,11 +31,10 @@ $(PROGRAM).o:		$(PROGRAM).c $(HEADERS)
 					@echo "CC (ASM) $< -> $@"
 					@avr-gcc -S $(CFLAGS) $< -o $@
 
-adc.o:						adc.h
-ioports.o:					ioports.h
-timer0.o:					timer0.h
-watchdog.o:					watchdog.h
-usitwislave/usitwislave.o:	usitwislave/usitwislave.h usitwislave/usitwislave_devices.h 
+adc.o:				adc.h
+ioports.o:			ioports.h
+timer0.o:			timer0.h
+watchdog.o:			watchdog.h
 
 $(ELFFILE):			$(OBJFILES)
 					@echo "LD $(OBJFILES) -> $@"
