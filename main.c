@@ -1,8 +1,12 @@
 #include <stdint.h>
+#include <string.h>
+
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
+#include <util/delay.h>
 
-#include <usitwislave.h>
+#include "usbdrv.h"
 
 #include "ioports.h"
 #include "adc.h"
@@ -36,20 +40,30 @@ typedef struct
 	uint8_t		state;
 } counter_meta_t;
 
-static	const	ioport_t		*ioport;
-static			pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
-static			pwm_meta_t		pwm_meta[PWM_PORTS];
-static			pwm_meta_t		*pwm_slot;
-static			counter_meta_t	counter_meta[INPUT_PORTS];
-static			counter_meta_t	*counter_slot;
+static	const		ioport_t		*ioport;
+static				pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
+static				pwm_meta_t		pwm_meta[PWM_PORTS];
+static				pwm_meta_t		*pwm_slot;
+static				counter_meta_t	counter_meta[INPUT_PORTS];
+static				counter_meta_t	*counter_slot;
 
 static	uint8_t		watchdog_counter;
 static	uint8_t		slot, dirty, duty, next_duty, diff;
 static	uint8_t		timer0_value, timer0_debug_1, timer0_debug_2;
-static	uint8_t		i2c_sense_led, input_sense_led;
+static	uint8_t		command_sense_led, input_sense_led;
 static	uint16_t	duty16, diff16;
 
-static	void update_static_softpwm_ports(void);
+static	void		update_static_softpwm_ports(void);
+
+static uint8_t		receive_buffer[32];
+static uint8_t		receive_buffer_to_fetch	= 0;
+static uint8_t		receive_buffer_length	= 0;
+static uint8_t		receive_buffer_complete	= 0;
+
+static uint8_t		send_buffer[32];
+static uint8_t		send_buffer_sent		= 0;
+static uint8_t		send_buffer_length		= 0;
+static uint8_t		send_buffer_complete	= 1;
 
 static void put_word(uint16_t from, uint8_t *to)
 {
@@ -202,11 +216,11 @@ ISR(WDT_vect)
 		pwm_slot++;
 	}
 
-	if(i2c_sense_led == 1)
+	if(command_sense_led == 1)
 		*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
 
-	if(i2c_sense_led > 0)
-		i2c_sense_led--;
+	if(command_sense_led > 0)
+		command_sense_led--;
 
 	if(input_sense_led == 1)
 		*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
@@ -281,25 +295,30 @@ ISR(TIMER0_COMPB_vect) // timer 0 softpwm trigger
 	timer0_set_trigger(next_duty);
 }
 
-ISR(PCINT_vect)
+static inline void check_pinchange()
 {
-	dirty = 0;
+	static			uint8_t			pc_dirty, pc_slot;
+	static const	ioport_t		*pc_ioport;
+	static			counter_meta_t	*pc_counter_slot;
 
-	for(slot = 0; slot < INPUT_PORTS; slot++)
+	if(watchdog_counter < 5)
+		return;
+
+	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
 	{
-		ioport			= &input_ports[slot];
-		counter_slot	= &counter_meta[slot];
+		pc_ioport		= &input_ports[pc_slot];
+		pc_counter_slot	= &counter_meta[pc_slot];
 
-		if((watchdog_counter > 4) && ((*ioport->pin & _BV(ioport->bit)) ^ counter_slot->state))
+		if((*pc_ioport->pin & _BV(pc_ioport->bit)) ^ pc_counter_slot->state)
 		{
-			counter_slot->counter++;
-			dirty = 1;
+			pc_counter_slot->counter++;
+			pc_dirty = 1;
 		}
 
-		counter_slot->state = *ioport->pin & _BV(ioport->bit);
+		pc_counter_slot->state = *pc_ioport->pin & _BV(pc_ioport->bit);
 	}
 
-	if(dirty)
+	if(pc_dirty)
 	{
 		*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
 		input_sense_led = 8;
@@ -321,6 +340,74 @@ static void update_static_softpwm_ports(void)
 		pwm_slot++;
 		ioport++;
 	}
+}
+
+void usbEventResetReady(void)
+{
+}
+
+usbMsgLen_t usbFunctionSetup(uchar data[8])
+{
+	usbRequest_t *rq = (usbRequest_t *)data;
+
+	if((rq->bmRequestType & USBRQ_TYPE_MASK) != USBRQ_TYPE_VENDOR)
+		return(0);
+
+	if((rq->bmRequestType & USBRQ_RCPT_MASK) != USBRQ_RCPT_ENDPOINT)
+		return(0);
+
+	if((rq->bmRequestType & USBRQ_DIR_MASK) == USBRQ_DIR_HOST_TO_DEVICE)
+	{
+		receive_buffer_to_fetch = rq->wLength.word;
+		receive_buffer_length	= 0;
+		receive_buffer_complete	= 0;
+	}
+	else
+	{
+		send_buffer_sent		= 0;
+		send_buffer_complete	= 0;
+	}
+
+	return(USB_NO_MSG);
+}
+
+uint8_t usbFunctionRead(uint8_t *data, uint8_t length)
+{
+	if(length > send_buffer_length)
+		length = (send_buffer_length - send_buffer_sent);
+
+	memcpy(data, send_buffer + send_buffer_sent, length);
+	send_buffer_sent += length;
+
+	if(send_buffer_sent >= send_buffer_length)
+	{
+		send_buffer_sent		= 0;
+		send_buffer_length		= 0;
+		send_buffer_complete	= 1;
+	}
+
+	return(length);
+}
+
+uint8_t usbFunctionWrite(uint8_t *data, uint8_t length)
+{
+	if((receive_buffer_length + length) > sizeof(receive_buffer))
+	{
+		receive_buffer_to_fetch = sizeof(receive_buffer);
+		length = sizeof(receive_buffer) - receive_buffer_length;
+	}
+
+	memcpy(receive_buffer + receive_buffer_length, data, length);
+	receive_buffer_length += length;
+
+	if(receive_buffer_to_fetch >= receive_buffer_length)
+	{
+		receive_buffer_to_fetch = 0;
+		receive_buffer_complete	= 1;
+		return(1);
+	}
+
+	return(0);
 }
 
 static void build_reply(uint8_t volatile *output_buffer_length, volatile uint8_t *output_buffer,
@@ -401,7 +488,7 @@ static void extended_command(uint8_t buffer_size, volatile uint8_t input_buffer_
 	return(build_reply(output_buffer_length, output_buffer, input_buffer[0], 7, 0, 0));
 }
 
-static void twi_callback(uint8_t buffer_size, volatile uint8_t input_buffer_length, const volatile uint8_t *input_buffer,
+static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_length, const volatile uint8_t *input_buffer,
 						uint8_t volatile *output_buffer_length, volatile uint8_t *output_buffer)
 {
 	uint8_t input;
@@ -409,7 +496,7 @@ static void twi_callback(uint8_t buffer_size, volatile uint8_t input_buffer_leng
 	uint8_t	io;
 
 	*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
-	i2c_sense_led = 2;
+	command_sense_led = 2;
 
 	if(input_buffer_length < 1)
 		return(build_reply(output_buffer_length, output_buffer, 0, 1, 0, 0));
@@ -673,6 +760,7 @@ static void twi_callback(uint8_t buffer_size, volatile uint8_t input_buffer_leng
 			return(build_reply(output_buffer_length, output_buffer, input, 0, 0, 0));
 		}
 
+#if 0
 		case(0xf0):	// twi stats
 		{
 			uint8_t		replystring[2];
@@ -733,6 +821,8 @@ static void twi_callback(uint8_t buffer_size, volatile uint8_t input_buffer_leng
 
 			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
 		}
+#endif
+
 		default:
 		{
 			return(build_reply(output_buffer_length, output_buffer, input, 2, 0, 0));
@@ -750,7 +840,7 @@ int main(void)
 				(0 << 4)		|
 				(0 << PRTIM1)	|	// timer1
 				(0 << PRTIM0)	|	// timer0
-				(0 << PRUSI)	|	// usi
+				(1 << PRUSI)	|	// usi
 				(0 << PRADC);		// adc / analog comperator
 
 	DDRA	= 0;
@@ -764,8 +854,6 @@ int main(void)
 		*ioport->port		&= ~_BV(ioport->bit);
 		*ioport->ddr		&= ~_BV(ioport->bit);
 		*ioport->port		|=  _BV(ioport->bit);
-		*ioport->pcmskreg	|=  _BV(ioport->pcmskbit);
-		GIMSK				|=  _BV(ioport->gimskbit);
 
 		ioport					= &input_ports[slot];
 		counter_slot			= &counter_meta[slot];
@@ -839,7 +927,25 @@ int main(void)
 	watchdog_setup(WATCHDOG_PRESCALER);
 	watchdog_start();
 
-	usi_twi_slave(0x02, 1, twi_callback, 0);
+	usbInit();
+	usbDeviceDisconnect();
+	_delay_ms(250);
+	usbDeviceConnect();
+
+	sei();
+
+	for(;;)
+	{
+		usbPoll();
+
+		if(usbSofCount == 0xff)
+			PORTA ^= _BV(0);
+
+		if(receive_buffer_complete)
+			process_input(sizeof(send_buffer), receive_buffer_length, receive_buffer, &send_buffer_length, send_buffer);
+
+		check_pinchange();
+	}
 
 	return(0);
 }
