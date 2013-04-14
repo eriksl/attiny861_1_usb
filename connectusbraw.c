@@ -4,7 +4,7 @@
 
 #include <libusb-1.0/libusb.h>
 
-static void debugpkt(const char *id, int length, const uint8_t *data)
+static void debug_packet(const char *id, int length, const uint8_t *data)
 {
 	int ix;
 
@@ -16,6 +16,51 @@ static void debugpkt(const char *id, int length, const uint8_t *data)
 	printf("\n");
 }
 
+static void send_packet(libusb_device_handle *handle, size_t length, uint8_t *packet)
+{
+	ssize_t rv;
+
+	rv = libusb_control_transfer(handle,
+			LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT,
+			0, 0, 0, 
+			packet, length, 0);
+
+	if(rv < 0)
+		fprintf(stderr, "send_packet: %s\n", libusb_error_name(rv));
+}
+
+static size_t receive_packet(libusb_device_handle *handle, size_t length, uint8_t *packet)
+{
+	ssize_t rv;
+
+	rv = libusb_control_transfer(handle,
+			LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT,
+			0, 0, 0, 
+			packet, length, 1000);
+
+	if(rv < 0)
+	{
+		fprintf(stderr, "libusb_control_transfer(receive): %s\n", libusb_error_name(rv));
+		rv = 0;
+	}
+
+	return(rv);
+}
+
+static void communicate(libusb_device_handle *handle)
+{
+	uint8_t in_packet[128];
+	uint8_t out_packet[128];
+	ssize_t	length;
+
+	out_packet[0] = 0;
+
+	send_packet(handle, 1, out_packet);
+	length = receive_packet(handle, sizeof(in_packet), in_packet);
+
+	debug_packet("identify", length, in_packet);
+}
+
 int main(int argc, char **argv)
 {
 	ssize_t							rv, ix;
@@ -25,7 +70,6 @@ int main(int argc, char **argv)
 	libusb_device_handle			*handle;
 	uint8_t							manufacturer[32];
 	uint8_t							product[32];
-	uint8_t							packet[32];
 
 	if((rv = libusb_init(0)) != 0)
 	{
@@ -105,45 +149,7 @@ int main(int argc, char **argv)
 			return(-1);
 		}
 
-#if 0
-		for(;;)
-		{
-			rv = libusb_control_transfer(handle,
-					LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT,
-					0, 0, 0, 
-					packet, sizeof(packet), 1);
-
-			if(rv < 0)
-			{
-				if(rv != LIBUSB_ERROR_TIMEOUT)
-					fprintf(stderr, "libusb_control_transfer(flush): %s\n", libusb_error_name(rv));
-				break;
-			}
-
-			//debugpkt("flush", rv, packet);
-		}
-#endif
-
-		for(ix = 0; ix < sizeof(packet); ix++)
-			packet[ix] = (uint8_t)ix;
-
-		rv = libusb_control_transfer(handle,
-				LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT,
-				0, 0, 0, 
-				packet, sizeof(packet), 0);
-
-		if(rv < 0)
-			fprintf(stderr, "libusb_control_transfer(send): %s\n", libusb_error_name(rv));
-
-		rv = libusb_control_transfer(handle,
-				LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT,
-				0, 0, 0, 
-				packet, sizeof(packet), 1000);
-
-		if(rv < 0)
-			fprintf(stderr, "libusb_control_transfer(receive): %s\n", libusb_error_name(rv));
-		else
-			debugpkt("receive:", rv, packet);
+		communicate(handle);
 
 		if((rv = libusb_release_interface(handle, 0)) < 0)
 		{
