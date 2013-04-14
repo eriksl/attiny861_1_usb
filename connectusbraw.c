@@ -4,16 +4,31 @@
 
 #include <libusb-1.0/libusb.h>
 
-static void debug_packet(const char *id, int length, const uint8_t *data)
+static void debug_packet(const char *id, size_t length, const uint8_t *data)
 {
 	int ix;
 
-	printf("%s[%d]> ", id, length);
+	printf("%s[%d]> ", id, (int)length);
 
 	for(ix = 0; ix < length; ix++)
 		printf("%02x ", data[ix]);
 
 	printf("\n");
+}
+
+static void check_packet(const char *id, size_t length, const uint8_t *packet)
+{
+	int ix;
+	uint8_t checksum = 0;
+
+	if(length < 2)
+		printf("%s: packet too short\n", id);
+	else
+	{
+		for(ix = 1; ix < (length - 1); ix++)
+			checksum += packet[ix];
+		printf("%s: checksum: %02x, calculated: %02x\n", id, packet[length - 1], checksum);
+	}
 }
 
 static void send_packet(libusb_device_handle *handle, size_t length, uint8_t *packet)
@@ -53,11 +68,16 @@ static void communicate(libusb_device_handle *handle)
 	uint8_t out_packet[128];
 	ssize_t	length;
 
-	out_packet[0] = 0;
-
+	out_packet[0] = 0x40;
 	send_packet(handle, 1, out_packet);
 	length = receive_packet(handle, sizeof(in_packet), in_packet);
+	check_packet("error", length, in_packet);
+	debug_packet("error", length, in_packet);
 
+	out_packet[0] = 0;
+	send_packet(handle, 1, out_packet);
+	length = receive_packet(handle, sizeof(in_packet), in_packet);
+	check_packet("identify", length, in_packet);
 	debug_packet("identify", length, in_packet);
 }
 
