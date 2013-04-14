@@ -1,15 +1,16 @@
 MCU			=		attiny861
+USE_CRYSTAL	=		0
 MCUSPEED	=		16500000
 PROGRAMMER	=		dragon_isp
 PRGFLAGS	=		-b 0 -P usb
 
 PROGRAM		=		main
-OBJFILES	=		v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o adc.o ioports.o timer0.o pwm_timer1.o watchdog.o $(PROGRAM).o
-HEADERS		=		usbconfig.h v-usb/usbdrv/usbdrv.h adc.h v-usb/usbdrv/usbportability.h ioports.h timer0.h pwm_timer1.h watchdog.h
+OBJFILES	=		v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o adc.o ioports.o timer0.o pwm_timer1.o $(PROGRAM).o
+HEADERS		=		usbconfig.h v-usb/usbdrv/usbdrv.h adc.h v-usb/usbdrv/usbportability.h ioports.h timer0.h pwm_timer1.h
 HEXFILE		=		$(PROGRAM).hex
 ELFFILE		=		$(PROGRAM).elf
 PROGRAMMED	=		.programmed
-CFLAGS		=		-I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv -Wall -Winline -O3 -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) \
+CFLAGS		=		-I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv -Wall -Winline -O3 -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) \
 					-fpack-struct -funit-at-a-time -fno-keep-static-consts -frename-registers
 LDFLAGS		=		-Wall -mmcu=$(MCU)
 
@@ -38,7 +39,6 @@ $(PROGRAM).o:		$(PROGRAM).c $(HEADERS)
 adc.o:				adc.h
 ioports.o:			ioports.h
 timer0.o:			timer0.h
-watchdog.o:			watchdog.h
 
 $(ELFFILE):			$(OBJFILES)
 					@echo "LD $(OBJFILES) -> $@"

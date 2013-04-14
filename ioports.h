@@ -15,6 +15,9 @@ typedef struct
 	volatile	uint8_t		*pin;
 	volatile	uint8_t		*ddr;
 				uint8_t		bit;
+	volatile	uint8_t		*pcmskreg;
+				uint8_t		pcmskbit;
+				uint8_t		gimskbit;
 } ioport_t;
 
 typedef struct
@@ -33,10 +36,10 @@ typedef struct
 
 enum
 {
-	ADC_PORTS				= 4,
-	INPUT_PORTS				= 4,
+	ADC_PORTS				= 2,
+	INPUT_PORTS				= 2,
 	OUTPUT_PORTS			= 1,
-	INTERNAL_OUTPUT_PORTS	= 2,
+	INTERNAL_OUTPUT_PORTS	= 3,
 	PWM_PORTS				= 3
 };
 

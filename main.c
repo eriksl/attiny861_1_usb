@@ -12,12 +12,6 @@
 #include "adc.h"
 #include "timer0.h"
 #include "pwm_timer1.h"
-#include "watchdog.h"
-
-enum
-{
-	WATCHDOG_PRESCALER = WATCHDOG_PRESCALER_2K,
-};
 
 typedef enum
 {
@@ -45,15 +39,11 @@ static				pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
 static				pwm_meta_t		pwm_meta[PWM_PORTS];
 static				pwm_meta_t		*pwm_slot;
 static				counter_meta_t	counter_meta[INPUT_PORTS];
-static				counter_meta_t	*counter_slot;
 
-static	uint8_t		watchdog_counter;
-static	uint8_t		slot, dirty, duty, next_duty, diff;
+static	uint8_t		pm_counter;
+static	uint8_t		slot, duty, next_duty;
 static	uint8_t		timer0_value, timer0_debug_1, timer0_debug_2;
 static	uint8_t		command_sense_led, input_sense_led;
-static	uint16_t	duty16, diff16;
-
-static	void		update_static_softpwm_ports(void);
 
 static uint8_t		receive_buffer[32];
 static uint8_t		receive_buffer_to_fetch	= 0;
@@ -63,7 +53,6 @@ static uint8_t		receive_buffer_complete	= 0;
 static uint8_t		send_buffer[32];
 static uint8_t		send_buffer_sent		= 0;
 static uint8_t		send_buffer_length		= 0;
-static uint8_t		send_buffer_complete	= 1;
 
 static void put_word(uint16_t from, uint8_t *to)
 {
@@ -85,150 +74,6 @@ static void put_long(uint32_t from, uint8_t *to)
 	*(--to) = from & 0xff;
 	from >>= 8;
 	*(--to) = from & 0xff;
-}
-
-ISR(WDT_vect)
-{
-	dirty = 0;
-
-	if(watchdog_counter < 255)
-		watchdog_counter++;
-
-	pwm_slot = &softpwm_meta[0];
-
-	for(slot = OUTPUT_PORTS; slot > 0; slot--)
-	{
-		duty	= pwm_slot->duty;
-		diff	= duty / 10;
-
-		if(diff < 3)
-			diff = 3;
-
-		switch(pwm_slot->pwm_mode)
-		{
-			case(pwm_mode_fade_in):
-			case(pwm_mode_fade_in_out_cont):
-			{
-				if(duty < (255 - diff))
-					duty += diff;
-				else
-				{
-					duty = 255;
-
-					if(pwm_slot->pwm_mode == pwm_mode_fade_in)
-						pwm_slot->pwm_mode = pwm_mode_none;
-					else
-						pwm_slot->pwm_mode = pwm_mode_fade_out_in_cont;
-				}
-
-				pwm_slot->duty = duty;
-
-				dirty = 1;
-
-				break;
-			}
-
-			case(pwm_mode_fade_out):
-			case(pwm_mode_fade_out_in_cont):
-			{
-				if(duty > diff)
-					duty -= diff;
-				else
-				{
-					duty = 0;
-
-					if(pwm_slot->pwm_mode == pwm_mode_fade_out)
-						pwm_slot->pwm_mode = pwm_mode_none;
-					else
-						pwm_slot->pwm_mode = pwm_mode_fade_in_out_cont;
-				}
-
-				pwm_slot->duty = duty;
-
-				dirty = 1;
-
-				break;
-			}
-		}
-
-		pwm_slot++;
-	}
-
-	if(dirty)
-	{
-		update_static_softpwm_ports();
-		timer0_start();
-	}
-
-	pwm_slot = &pwm_meta[0];
-
-	for(slot = 0; slot < PWM_PORTS; slot++)
-	{
-		duty16	= pwm_timer1_get_pwm(slot);
-		diff16	= duty16 / 8;
-
-		if(diff16 < 8)
-			diff16 = 8;
-
-		switch(pwm_slot->pwm_mode)
-		{
-			case(pwm_mode_fade_in):
-			case(pwm_mode_fade_in_out_cont):
-			{
-				if(duty16 < (1020 - diff16))
-					duty16 += diff16;
-				else
-				{
-					duty16 = 1020;
-
-					if(pwm_slot->pwm_mode == pwm_mode_fade_in)
-						pwm_slot->pwm_mode = pwm_mode_none;
-					else
-						pwm_slot->pwm_mode = pwm_mode_fade_out_in_cont;
-				}
-
-				pwm_timer1_set_pwm(slot, duty16);
-
-				break;
-			}
-
-			case(pwm_mode_fade_out):
-			case(pwm_mode_fade_out_in_cont):
-			{
-				if(duty16 > diff16)
-					duty16 -= diff16;
-				else
-				{
-					duty16 = 0;
-
-					if(pwm_slot->pwm_mode == pwm_mode_fade_out)
-						pwm_slot->pwm_mode = pwm_mode_none;
-					else
-						pwm_slot->pwm_mode = pwm_mode_fade_in_out_cont;
-				}
-
-				pwm_timer1_set_pwm(slot, duty16);
-
-				break;
-			}
-		}
-
-		pwm_slot++;
-	}
-
-	if(command_sense_led == 1)
-		*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
-
-	if(command_sense_led > 0)
-		command_sense_led--;
-
-	if(input_sense_led == 1)
-		*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
-
-	if(input_sense_led > 0)
-		input_sense_led--;
-
-	watchdog_setup(WATCHDOG_PRESCALER);
 }
 
 ISR(TIMER0_COMPA_vect) // timer 0 softpwm overflow
@@ -295,13 +140,13 @@ ISR(TIMER0_COMPB_vect) // timer 0 softpwm trigger
 	timer0_set_trigger(next_duty);
 }
 
-static inline void check_pinchange()
+ISR(PCINT_vect)
 {
 	static			uint8_t			pc_dirty, pc_slot;
 	static const	ioport_t		*pc_ioport;
 	static			counter_meta_t	*pc_counter_slot;
 
-	if(watchdog_counter < 5)
+	if(pm_counter < 5)
 		return;
 
 	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
@@ -327,23 +172,217 @@ static inline void check_pinchange()
 
 static void update_static_softpwm_ports(void)
 {
-	pwm_slot	= &softpwm_meta[0];
-	ioport		= &output_ports[0];
+	static pwm_meta_t		*usp_pwm_slot	= &softpwm_meta[0];
+	static const ioport_t	*usp_ioport		= &output_ports[0];
+	static uint8_t			usp_slot;
 
-	for(slot = OUTPUT_PORTS; slot > 0; slot--)
+	for(usp_slot = OUTPUT_PORTS; usp_slot > 0; usp_slot--)
 	{
-		if(pwm_slot->duty == 0)
-			*ioport->port &= ~_BV(ioport->bit);
-		else if(pwm_slot->duty == 255)
-			*ioport->port |= _BV(ioport->bit);
+		if(usp_pwm_slot->duty == 0)
+			*usp_ioport->port &= ~_BV(usp_ioport->bit);
+		else if(usp_pwm_slot->duty == 255)
+			*usp_ioport->port |= _BV(usp_ioport->bit);
 
-		pwm_slot++;
-		ioport++;
+		usp_pwm_slot++;
+		usp_ioport++;
 	}
 }
 
+static inline void process_pwmmode(void)
+{
+	static pwm_meta_t	*pm_pwm_slot;
+	static uint8_t		pm_dirty, pm_slot, pm_duty, pm_diff;
+	static uint16_t		pm_duty16, pm_diff16;
+
+	pm_dirty = 0;
+
+	if(pm_counter < 255)
+		pm_counter++;
+
+	pm_pwm_slot = &softpwm_meta[0];
+
+	for(pm_slot = OUTPUT_PORTS; pm_slot > 0; pm_slot--)
+	{
+		pm_duty	= pm_pwm_slot->duty;
+		pm_diff	= pm_duty / 10;
+
+		if(pm_diff < 3)
+			pm_diff = 3;
+
+		switch(pm_pwm_slot->pwm_mode)
+		{
+			case(pwm_mode_fade_in):
+			case(pwm_mode_fade_in_out_cont):
+			{
+				if(pm_duty < (255 - pm_diff))
+					pm_duty += pm_diff;
+				else
+				{
+					pm_duty = 255;
+
+					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_in)
+						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					else
+						pm_pwm_slot->pwm_mode = pwm_mode_fade_out_in_cont;
+				}
+
+				pm_pwm_slot->duty = pm_duty;
+
+				pm_dirty = 1;
+
+				break;
+			}
+
+			case(pwm_mode_fade_out):
+			case(pwm_mode_fade_out_in_cont):
+			{
+				if(pm_duty > pm_diff)
+					pm_duty -= pm_diff;
+				else
+				{
+					pm_duty = 0;
+
+					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_out)
+						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					else
+						pm_pwm_slot->pwm_mode = pwm_mode_fade_in_out_cont;
+				}
+
+				pm_pwm_slot->duty = pm_duty;
+
+				pm_dirty = 1;
+
+				break;
+			}
+		}
+
+		pm_pwm_slot++;
+	}
+
+	if(pm_dirty)
+	{
+		update_static_softpwm_ports();
+		timer0_start();
+	}
+
+	pm_pwm_slot = &pwm_meta[0];
+
+	for(pm_slot = 0; pm_slot < PWM_PORTS; pm_slot++)
+	{
+		pm_duty16	= pwm_timer1_get_pwm(pm_slot);
+		pm_diff16	= pm_duty16 / 8;
+
+		if(pm_diff16 < 8)
+			pm_diff16 = 8;
+
+		switch(pm_pwm_slot->pwm_mode)
+		{
+			case(pwm_mode_fade_in):
+			case(pwm_mode_fade_in_out_cont):
+			{
+				if(pm_duty16 < (1020 - pm_diff16))
+					pm_duty16 += pm_diff16;
+				else
+				{
+					pm_duty16 = 1020;
+
+					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_in)
+						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					else
+						pm_pwm_slot->pwm_mode = pwm_mode_fade_out_in_cont;
+				}
+
+				pwm_timer1_set_pwm(pm_slot, pm_duty16);
+
+				break;
+			}
+
+			case(pwm_mode_fade_out):
+			case(pwm_mode_fade_out_in_cont):
+			{
+				if(pm_duty16 > pm_diff16)
+					pm_duty16 -= pm_diff16;
+				else
+				{
+					pm_duty16 = 0;
+
+					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_out)
+						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					else
+						pm_pwm_slot->pwm_mode = pwm_mode_fade_in_out_cont;
+				}
+
+				pwm_timer1_set_pwm(pm_slot, pm_duty16);
+
+				break;
+			}
+		}
+
+		pm_pwm_slot++;
+	}
+
+	if(command_sense_led == 1)
+		*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
+
+	if(command_sense_led > 0)
+		command_sense_led--;
+
+	if(input_sense_led == 1)
+		*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
+
+	if(input_sense_led > 0)
+		input_sense_led--;
+}
+
+#if (USE_CRYSTAL == 0)
+static void calibrateOscillator(void)
+{
+	uint8_t		step = 128;
+	uint8_t		trialValue = 0, optimumValue;
+	uint16_t	x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
+
+	/* do a binary search: */
+
+	do
+	{
+		OSCCAL = trialValue + step;
+		x = usbMeasureFrameLength();	// proportional to current real frequency
+		if(x < targetValue)				// frequency still too low
+			trialValue += step;
+		step >>= 1;
+	}
+	while(step > 0);
+
+	/* We have a precision of +/- 1 for optimum OSCCAL here */
+	/* now do a neighborhood search for optimum value */
+
+	optimumValue	= trialValue;
+	optimumDev		= x; // this is certainly far away from optimum
+
+	for(OSCCAL = trialValue - 1; OSCCAL <= trialValue + 1; OSCCAL++)
+	{
+		x = usbMeasureFrameLength() - targetValue;
+
+		if(x < 0)
+			x = -x;
+		if(x < optimumDev)
+		{
+			optimumDev = x;
+			optimumValue = OSCCAL;
+		}
+	}
+
+	OSCCAL = optimumValue;
+}
+#endif
+
 void usbEventResetReady(void)
 {
+#if (USE_CRYSTAL == 0)
+	cli(); // usbMeasureFrameLength() counts CPU cycles, so disable interrupts.
+	calibrateOscillator();
+	sei();
+#endif
 }
 
 usbMsgLen_t usbFunctionSetup(uchar data[8])
@@ -363,10 +402,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 		receive_buffer_complete	= 0;
 	}
 	else
-	{
 		send_buffer_sent		= 0;
-		send_buffer_complete	= 0;
-	}
 
 	return(USB_NO_MSG);
 }
@@ -383,7 +419,6 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t length)
 	{
 		send_buffer_sent		= 0;
 		send_buffer_length		= 0;
-		send_buffer_complete	= 1;
 	}
 
 	return(length);
@@ -834,6 +869,8 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 
 int main(void)
 {
+	cli();
+
 	PRR =		(0 << 7)		|
 				(0 << 6)		|	// reserved
 				(0 << 5)		|
@@ -851,11 +888,15 @@ int main(void)
 
 	for(slot = 0; slot < INPUT_PORTS; slot++)
 	{
-		*ioport->port		&= ~_BV(ioport->bit);
-		*ioport->ddr		&= ~_BV(ioport->bit);
-		*ioport->port		|=  _BV(ioport->bit);
+		counter_meta_t	*counter_slot;
 
 		ioport					= &input_ports[slot];
+		*ioport->port			&= ~_BV(ioport->bit);
+		*ioport->ddr			&= ~_BV(ioport->bit);
+		*ioport->port			|=  _BV(ioport->bit);
+		*ioport->pcmskreg		|=  _BV(ioport->pcmskbit);
+		GIMSK					|=  _BV(ioport->gimskbit);
+
 		counter_slot			= &counter_meta[slot];
 		counter_slot->state		= *ioport->pin & _BV(ioport->bit);
 		counter_slot->counter	= 0;
@@ -863,18 +904,17 @@ int main(void)
 
 	for(slot = 0; slot < OUTPUT_PORTS; slot++)
 	{
-		ioport = &output_ports[slot];
-
+		ioport			= &output_ports[slot];
 		*ioport->ddr	|= _BV(ioport->bit);
 		*ioport->port	&= ~_BV(ioport->bit);
+
 		softpwm_meta[slot].duty		= 0;
 		softpwm_meta[slot].pwm_mode	= pwm_mode_none;
 	}
 
 	for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 	{
-		ioport = &internal_output_ports[slot];
-
+		ioport			= &internal_output_ports[slot];
 		*ioport->ddr	|= _BV(ioport->bit);
 		*ioport->port	&= ~_BV(ioport->bit);
 	}
@@ -924,9 +964,6 @@ int main(void)
 	pwm_timer1_set_max(0x3ff);
 	pwm_timer1_start();
 
-	watchdog_setup(WATCHDOG_PRESCALER);
-	watchdog_start();
-
 	usbInit();
 	usbDeviceDisconnect();
 	_delay_ms(250);
@@ -936,15 +973,25 @@ int main(void)
 
 	for(;;)
 	{
+		static uint8_t ext_sof_count = 0;
+
 		usbPoll();
 
-		if(usbSofCount == 0xff)
-			PORTA ^= _BV(0);
+		if(usbSofCount > 16)
+		{
+			ext_sof_count++;
+			usbSofCount = 0;
+			process_pwmmode();
+		}
+
+		if(ext_sof_count > 32)
+		{
+			ext_sof_count = 0;
+			*internal_output_ports[2].port ^= _BV(internal_output_ports[2].bit);
+		}
 
 		if(receive_buffer_complete)
 			process_input(sizeof(send_buffer), receive_buffer_length, receive_buffer, &send_buffer_length, send_buffer);
-
-		check_pinchange();
 	}
 
 	return(0);

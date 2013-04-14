@@ -29,11 +29,11 @@ section at the end of this file).
 /* This is the port where the USB bus is connected. When you configure it to
  * "B", the registers PORTB, PINB and DDRB will be used.
  */
-#define USB_CFG_DMINUS_BIT      0
+#define USB_CFG_DMINUS_BIT      2
 /* This is the bit number in USB_CFG_IOPORT where the USB D- line is connected.
  * This may be any bit in the port.
  */
-#define USB_CFG_DPLUS_BIT       2
+#define USB_CFG_DPLUS_BIT       0
 /* This is the bit number in USB_CFG_IOPORT where the USB D+ line is connected.
  * This may be any bit in the port. Please note that D+ must also be connected
  * to interrupt pin INT0! [You can also use other interrupts, see section
@@ -51,7 +51,11 @@ section at the end of this file).
  * Since F_CPU should be defined to your actual clock rate anyway, you should
  * not need to modify this setting.
  */
+#if (USE_CRYSTAL == 0)
 #define USB_CFG_CHECK_CRC       0
+#else
+#define USB_CFG_CHECK_CRC       1
+#endif
 /* Define this to 1 if you want that the driver checks integrity of incoming
  * data packets (CRC checks). CRC checks cost quite a bit of code size and are
  * currently only available for 18 MHz crystal clock. You must choose
@@ -380,6 +384,15 @@ section at the end of this file).
 /* #define USB_INTR_PENDING        GIFR */
 /* #define USB_INTR_PENDING_BIT    INTF0 */
 /* #define USB_INTR_VECTOR         INT0_vect */
+
+#define USB_INTR_CFG            MCUCR
+#define USB_INTR_CFG_SET        (_BV(ISC00)) | (_BV(ISC01))
+#define USB_INTR_CFG_CLR        0
+#define USB_INTR_ENABLE         GIMSK
+#define USB_INTR_ENABLE_BIT     INT1
+#define USB_INTR_PENDING        GIFR
+#define USB_INTR_PENDING_BIT    INTF1
+#define USB_INTR_VECTOR         INT1_vect
 
 #ifndef __ASSEMBLER__
 extern void usbEventResetReady(void);

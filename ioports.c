@@ -9,14 +9,6 @@ const adcport_t adc_ports[ADC_PORTS] =
 		{ 0, 0, 0 },			// Vref = Vcc
 		{ 0, 1, 1, 0, 0, 0 },	// mux = adc6
 	},
-	{							// pa5 pin 13
-		{ 0, 0, 0 },			// Vref = Vcc
-		{ 0, 0, 1, 0, 0, 0 },	// mux = adc4
-	},
-	{							// pa4 pin 14
-		{ 0, 0, 0 },			// Vref = Vcc
-		{ 1, 1, 0, 0, 0, 0 },	// mux = adc3
-	},
 	{							// internal temp sensor
 		{ 0, 1, 0, },			// Vref = internal 1.1V reference
 		{ 1, 1, 1, 1, 1, 1 }	// mux = adc11
@@ -25,10 +17,8 @@ const adcport_t adc_ports[ADC_PORTS] =
 
 const ioport_t input_ports[INPUT_PORTS] =
 {
-	{ &PORTB, &PINB, &DDRB, 6 },	// b6
-	{ &PORTA, &PINA, &DDRA, 6 },	// a6
-	{ &PORTB, &PINB, &DDRB, 0 },	// b0
-	{ &PORTA, &PINA, &DDRA, 1 }	// a1
+	{ &PORTB, &PINB, &DDRB, 6, &PCMSK1, PCINT14, PCIE1 },	// b6
+	{ &PORTA, &PINA, &DDRA, 6, &PCMSK0, PCINT6,  PCIE1 },	// a6
 };
 
 const ioport_t output_ports[OUTPUT_PORTS] =
@@ -40,6 +30,7 @@ const ioport_t internal_output_ports[INTERNAL_OUTPUT_PORTS] =
 {
 	{ &PORTB, &PINB, &DDRB, 4 },	// b4
 	{ &PORTA, &PINA, &DDRA, 3 },	// a3
+	{ &PORTA, &PINA, &DDRA, 4 },	// a4
 };
 
 const pwmport_t pwm_ports[PWM_PORTS] =
