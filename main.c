@@ -40,10 +40,9 @@ static				pwm_meta_t		pwm_meta[PWM_PORTS];
 static				pwm_meta_t		*pwm_slot;
 static				counter_meta_t	counter_meta[INPUT_PORTS];
 
-static	uint8_t		pm_counter;
+static	uint8_t		usb_running;
 static	uint8_t		slot, duty, next_duty;
 static	uint8_t		timer0_value, timer0_debug_1, timer0_debug_2;
-static	uint8_t		command_sense_led, input_sense_led;
 
 static uint8_t		receive_buffer[32];
 static uint8_t		receive_buffer_to_fetch	= 0;
@@ -140,13 +139,13 @@ ISR(TIMER0_COMPB_vect) // timer 0 softpwm trigger
 	timer0_set_trigger(next_duty);
 }
 
-ISR(PCINT_vect)
+ISR(PCINT_vect, ISR_NOBLOCK)
 {
 	static			uint8_t			pc_dirty, pc_slot;
 	static const	ioport_t		*pc_ioport;
 	static			counter_meta_t	*pc_counter_slot;
 
-	if(pm_counter < 5)
+	if(!usb_running)
 		return;
 
 	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
@@ -164,10 +163,7 @@ ISR(PCINT_vect)
 	}
 
 	if(pc_dirty)
-	{
 		*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
-		input_sense_led = 8;
-	}
 }
 
 static void update_static_softpwm_ports(void)
@@ -195,10 +191,6 @@ static inline void process_pwmmode(void)
 	static uint16_t		pm_duty16, pm_diff16;
 
 	pm_dirty = 0;
-
-	if(pm_counter < 255)
-		pm_counter++;
-
 	pm_pwm_slot = &softpwm_meta[0];
 
 	for(pm_slot = OUTPUT_PORTS; pm_slot > 0; pm_slot--)
@@ -321,17 +313,6 @@ static inline void process_pwmmode(void)
 		pm_pwm_slot++;
 	}
 
-	if(command_sense_led == 1)
-		*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
-
-	if(command_sense_led > 0)
-		command_sense_led--;
-
-	if(input_sense_led == 1)
-		*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
-
-	if(input_sense_led > 0)
-		input_sense_led--;
 }
 
 #if (USE_CRYSTAL == 0)
@@ -533,7 +514,6 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 	uint8_t	io;
 
 	*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
-	command_sense_led = 2;
 
 	if(input_buffer_length < 1)
 		return(build_reply(output_buffer_length, output_buffer, 0, 1, 0, 0));
@@ -975,21 +955,30 @@ int main(void)
 
 	for(;;)
 	{
-		static uint8_t ext_sof_count = 0;
+		static uint8_t ext_sof_count1 = 0, ext_sof_count2 = 0;
 
 		usbPoll();
 
 		if(usbSofCount > 16)
 		{
-			ext_sof_count++;
-			usbSofCount = 0;
 			process_pwmmode();
+			usb_running = 1;
+			ext_sof_count1++;
+			usbSofCount = 0;
 		}
 
-		if(ext_sof_count > 32)
+		if(ext_sof_count1 > 4)
 		{
-			ext_sof_count = 0;
-			*internal_output_ports[2].port ^= _BV(internal_output_ports[2].bit);
+			*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
+			*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
+			ext_sof_count2++;
+			ext_sof_count1 = 0;
+		}
+
+		if(ext_sof_count2 > 8)
+		{
+			*internal_output_ports[2].port ^=  _BV(internal_output_ports[2].bit);
+			ext_sof_count2 = 0;
 		}
 
 		if(receive_buffer_complete)

@@ -28,9 +28,8 @@ const ioport_t output_ports[OUTPUT_PORTS] =
 
 const ioport_t internal_output_ports[INTERNAL_OUTPUT_PORTS] =
 {
-	{ &PORTB, &PINB, &DDRB, 4 },	// b4
-	{ &PORTA, &PINA, &DDRA, 3 },	// a3
-	{ &PORTA, &PINA, &DDRA, 4 },	// a4
+	{ &PORTA, &PINA, &DDRA, 3 },	// a3	input sense led
+	{ &PORTA, &PINA, &DDRA, 0 },	// a0	command sense led
 };
 
 const pwmport_t pwm_ports[PWM_PORTS] =
