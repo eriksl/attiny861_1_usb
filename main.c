@@ -919,7 +919,10 @@ int main(void)
 		}
 
 		if(receive_buffer_complete)
+		{
 			process_input(sizeof(send_buffer), receive_buffer_length, receive_buffer, &send_buffer_length, send_buffer);
+			receive_buffer_complete	= 0;
+		}
 	}
 
 	return(0);
