@@ -845,6 +845,20 @@ int main(void)
 		pwm_meta[slot].pwm_mode		= pwm_mode_none;
 	}
 
+	adc_init();
+
+	// 8 mhz / 256 / 256 = 122 Hz
+	timer0_init(TIMER0_PRESCALER_256);
+	timer0_set_max(0xff);
+
+	// 8 mhz / 32 / 1024 = 244 Hz
+	pwm_timer1_init(PWM_TIMER1_PRESCALER_32);
+	pwm_timer1_set_max(0x3ff);
+	pwm_timer1_start();
+
+	usb_running = 0;
+	usbInit();
+	usbDeviceDisconnect();
 	for(duty = 0; duty < 3; duty++)
 	{
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
@@ -875,21 +889,6 @@ int main(void)
 			_delay_ms(25);
 		}
 	}
-
-	adc_init();
-
-	// 8 mhz / 256 / 256 = 122 Hz
-	timer0_init(TIMER0_PRESCALER_256);
-	timer0_set_max(0xff);
-
-	// 8 mhz / 32 / 1024 = 244 Hz
-	pwm_timer1_init(PWM_TIMER1_PRESCALER_32);
-	pwm_timer1_set_max(0x3ff);
-	pwm_timer1_start();
-
-	usbInit();
-	usbDeviceDisconnect();
-	_delay_ms(250);
 	usbDeviceConnect();
 
 	sei();
