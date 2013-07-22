@@ -43,15 +43,6 @@ MODEL 6 (ATTINY861A), VERSION 1, REVISION 0
 
 			1	1	0	0	0						0xc0	start adc conversion, analog input #
 
-			1	1	1	1	0		0	0	0		0xf0	twi stats - disable
-			1	1	1	1	0		0	0	1		0xf1	twi stats - enable
-			1	1	1	1	0		0	1	0		0xf2	twi stats - read start conditions		returns AA BB as msb lsb.
-			1	1	1	1	0		0	1	1		0xf3	twi stats - read stop conditions		returns AA BB as msb lsb.
-			1	1	1	1	0		1	0	0		0xf4	twi stats - read error conditions		returns AA BB as msb lsb.
-			1	1	1	1	0		1	0	1		0xf5	twi stats - read overflow conditions	returns AA BB as msb lsb.
-			1	1	1	1	0		1	1	0		0xf6	twi stats - read local frames			returns AA BB as msb lsb.
-			1	1	1	1	0		1	1	1		0xf7	twi stats - read idle calls				returns AA BB as msb lsb.
-
 	softpwm mode =
 			0	on
 			1	fade in

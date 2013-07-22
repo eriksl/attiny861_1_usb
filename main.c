@@ -777,69 +777,6 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			return(build_reply(output_buffer_length, output_buffer, input, 0, 0, 0));
 		}
 
-#if 0
-		case(0xf0):	// twi stats
-		{
-			uint8_t		replystring[2];
-			uint16_t	stats;
-
-			switch(io)
-			{
-				case(0x00):	//	disable
-				{
-					usi_twi_enable_stats(0);
-					return(build_reply(output_buffer_length, output_buffer, input, 0, 0, 0));
-				}
-
-				case(0x01):	//	enable
-				{
-					usi_twi_enable_stats(1);
-					return(build_reply(output_buffer_length, output_buffer, input, 0, 0, 0));
-				}
-
-				case(0x02):	//	read start conditions
-				{
-					stats = usi_twi_stats_start_conditions();
-					break;
-				}
-
-				case(0x03):	//	read stop conditions
-				{
-					stats = usi_twi_stats_stop_conditions();
-					break;
-				}
-
-				case(0x04):	//	read error conditions
-				{
-					stats = usi_twi_stats_error_conditions();
-					break;
-				}
-
-				case(0x05):	//	read overflow conditions
-				{
-					stats = usi_twi_stats_overflow_conditions();
-					break;
-				}
-
-				case(0x06):	//	read local frames
-				{
-					stats = usi_twi_stats_local_frames();
-					break;
-				}
-
-				case(0x07):	//	read idle calls
-				{
-					stats = usi_twi_stats_idle_calls();
-					break;
-				}
-			}
-
-			put_word(stats, replystring);
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
-		}
-#endif
-
 		default:
 		{
 			return(build_reply(output_buffer_length, output_buffer, input, 2, 0, 0));
