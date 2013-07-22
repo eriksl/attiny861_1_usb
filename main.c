@@ -851,24 +851,28 @@ int main(void)
 		{
 			ioport = &internal_output_ports[slot];
 			*ioport->port |= _BV(ioport->bit);
+			_delay_ms(25);
 		}
 
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
 			ioport = &internal_output_ports[slot];
 			*ioport->port &= ~_BV(ioport->bit);
+			_delay_ms(25);
 		}
 
 		for(slot = INTERNAL_OUTPUT_PORTS; slot > 0; slot--)
 		{
 			ioport = &internal_output_ports[slot - 1];
 			*ioport->port |= _BV(ioport->bit);
+			_delay_ms(25);
 		}
 
 		for(slot = INTERNAL_OUTPUT_PORTS; slot > 0; slot--)
 		{
 			ioport = &internal_output_ports[slot - 1];
 			*ioport->port &= ~_BV(ioport->bit);
+			_delay_ms(25);
 		}
 	}
 
