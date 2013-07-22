@@ -76,25 +76,25 @@ MODEL 6 (ATTINY861A), VERSION 1, REVISION 0
 
 *** FEATURES ***
 
-	pin		name		isp			usb		function			connection
+	pin		name		usb		pin function	connection
 
-	1		pb0			mosi 				pcint8 = input 2		input 3
-	2		pb1			miso 				oc1a = pwm 0			output 1
-	3		pb2			sck 				pb2 = output 0			output 4
-	4		pb3								oc1b = pwm 1			output 2
-	5		Vcc			Vcc			Vcc
-	6		GND			GND			GND
-	7		pb4								pb4 = output 1			i2c command led
-	8		pb5								oc1d = pwm 2			output 3
-	9		pb6								pcint14	= input 0		input 1
-	10		pb7			reset
-	11		pa7								adc6 / ain1				adc input 1
-	12		pa6								pcint6 = input 1		input 2
-	13		pa5								adc4 / ain2				adc input 2
-	14		pa4								adc3 / icp0				adc input 3
-	15		AVcc
-	16		AGND
-	17		pa3								pa3 = output 2			input sense led
-	18		pa2						d-		INT1
-	19		pa1								pcint1 = input 3		input 4
-	20		pa0						d+
+	1		pb0					MOSI/PB0		output 1
+	2		pb1					MISO/OC1A		output pwm 1
+	3		pb2					SCK/PB2			output 2
+	4		pb3					OC1B			output pwm 2
+	5		Vcc			V+		VCC				X
+	6		GND			V-		GND				X
+	7		pb4					XTAL1			X
+	8		pb5					XTAL2			X
+	9		pb6					PCINT14/PB6		input 1
+	10		pb7					RESET			X
+	11		pa7					ADC6/AIN1		adc input 1
+	12		pa6					ADC5/AIN0		adc input 2
+	13		pa5					PCINT5/PA5		input 2
+	14		pa4					PCINT4/PA4		input 3
+	15		AVcc				AVCC			X
+	16		AGND				AGND			X
+	17		pa3					PA3				input sense led
+	18		pa2			D-		INT1			USB d-
+	19		pa1					PA1				USB d+
+	20		pa0			D+		PA0				command sense led
