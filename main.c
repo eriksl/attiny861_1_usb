@@ -409,16 +409,18 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 
 uint8_t usbFunctionRead(uint8_t *data, uint8_t length)
 {
-	if(length > send_buffer_length)
+	if((send_buffer_sent + length) > send_buffer_length)
 		length = (send_buffer_length - send_buffer_sent);
 
-	memcpy(data, send_buffer + send_buffer_sent, length);
-	send_buffer_sent += length;
-
-	if(send_buffer_sent >= send_buffer_length)
+	if(length > 0)
 	{
-		send_buffer_sent		= 0;
-		send_buffer_length		= 0;
+		memcpy(data, send_buffer + send_buffer_sent, length);
+		send_buffer_sent += length;
+	}
+	else
+	{
+		send_buffer_sent	= 0;
+		send_buffer_length	= 0;
 	}
 
 	return(length);
@@ -445,24 +447,24 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t length)
 	return(0);
 }
 
-static void build_reply(uint8_t volatile *output_buffer_length, volatile uint8_t *output_buffer,
+static void build_reply(uint8_t volatile *output_length, volatile uint8_t *output,
 		uint8_t command, uint8_t error_code, uint8_t reply_length, const uint8_t *reply_string)
 {
 	uint8_t checksum;
 	uint8_t ix;
 
-	output_buffer[0] = 3 + reply_length;
-	output_buffer[1] = error_code;
-	output_buffer[2] = command;
+	output[0] = 3 + reply_length;
+	output[1] = error_code;
+	output[2] = command;
 
 	for(ix = 0; ix < reply_length; ix++)
-		output_buffer[3 + ix] = reply_string[ix];
+		output[3 + ix] = reply_string[ix];
 
 	for(ix = 1, checksum = 0; ix < (3 + reply_length); ix++)
-		checksum += output_buffer[ix];
+		checksum += output[ix];
 
-	output_buffer[3 + reply_length] = checksum;
-	*output_buffer_length = 3 + reply_length + 1;
+	output[3 + reply_length] = checksum;
+	*output_length = 3 + reply_length + 1;
 }
 
 static void extended_command(uint8_t buffer_size, volatile uint8_t input_buffer_length, const volatile uint8_t *input_buffer,

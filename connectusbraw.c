@@ -16,19 +16,27 @@ static void debug_packet(const char *id, size_t length, const uint8_t *data)
 	printf("\n");
 }
 
-static void check_packet(const char *id, size_t length, const uint8_t *packet)
+static int check_packet(const char *id, size_t length, const uint8_t *packet)
 {
 	int ix;
-	uint8_t checksum = 0;
+	uint8_t local_checksum, remote_checksum;
 
 	if(length < 2)
+	{
 		printf("%s: packet too short\n", id);
+		return(1);
+	}
 	else
 	{
-		for(ix = 1; ix < (length - 1); ix++)
-			checksum += packet[ix];
-		printf("%s: checksum: %02x, calculated: %02x\n", id, packet[length - 1], checksum);
+		for(ix = 1, local_checksum = 0; ix < (length - 1); ix++)
+			local_checksum += packet[ix];
+		remote_checksum = packet[length - 1];
+
+		if(local_checksum != remote_checksum)
+			printf("%s: local checksum: %02x, remote: %02x\n", id, local_checksum, remote_checksum);
 	}
+
+	return(local_checksum != remote_checksum);
 }
 
 static void send_packet(libusb_device_handle *handle, size_t length, uint8_t *packet)
@@ -71,14 +79,22 @@ static void communicate(libusb_device_handle *handle)
 	out_packet[0] = 0x40;
 	send_packet(handle, 1, out_packet);
 	length = receive_packet(handle, sizeof(in_packet), in_packet);
-	check_packet("error", length, in_packet);
-	debug_packet("error", length, in_packet);
+	if(check_packet("error", length, in_packet))
+		debug_packet("error", length, in_packet);
 
 	out_packet[0] = 0;
 	send_packet(handle, 1, out_packet);
 	length = receive_packet(handle, sizeof(in_packet), in_packet);
-	check_packet("identify", length, in_packet);
-	debug_packet("identify", length, in_packet);
+	if(check_packet("identify", length, in_packet))
+		debug_packet("identify", length, in_packet);
+
+	out_packet[0] = 0xa0;
+	out_packet[1] = 0x03;
+
+	send_packet(handle, 2, out_packet);
+	length = receive_packet(handle, sizeof(in_packet), in_packet);
+	if(check_packet("pwm_mode", length, in_packet))
+		debug_packet("pwm_mode", length, in_packet);
 }
 
 int main(int argc, char **argv)
@@ -146,8 +162,8 @@ int main(int argc, char **argv)
 			return(-1);
 		}
 
-		printf("found at %04x:%04x = %04x\n", 
-			descriptor.idVendor, descriptor.idProduct, descriptor.bcdDevice);
+		//printf("found at %04x:%04x = %04x\n", 
+			//descriptor.idVendor, descriptor.idProduct, descriptor.bcdDevice);
 
 		if((rv = libusb_open(device, &handle) < 0))
 		{
