@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <libusb-1.0/libusb.h>
 
@@ -14,6 +15,16 @@ static void debug_packet(const char *id, size_t length, const uint8_t *data)
 		printf("%02x ", data[ix]);
 
 	printf("\n");
+
+	printf("%s[%d]> ", id, (int)length);
+
+	for(ix = 0; ix < length; ix++)
+		if(data[ix] >= ' ' && data[ix] <= '~')
+			printf(" %c ", data[ix]);
+		else
+			printf(" %c ", '~');
+
+	printf("\n\n");
 }
 
 static int check_packet(const char *id, size_t length, const uint8_t *packet)
@@ -46,7 +57,7 @@ static void send_packet(libusb_device_handle *handle, size_t length, uint8_t *pa
 	rv = libusb_control_transfer(handle,
 			LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_ENDPOINT,
 			0, 0, 0, 
-			packet, length, 0);
+			packet, length, 1000);
 
 	if(rv < 0)
 		fprintf(stderr, "send_packet: %s\n", libusb_error_name(rv));
@@ -70,33 +81,6 @@ static size_t receive_packet(libusb_device_handle *handle, size_t length, uint8_
 	return(rv);
 }
 
-static void communicate(libusb_device_handle *handle)
-{
-	uint8_t in_packet[128];
-	uint8_t out_packet[128];
-	ssize_t	length;
-
-	out_packet[0] = 0x40;
-	send_packet(handle, 1, out_packet);
-	length = receive_packet(handle, sizeof(in_packet), in_packet);
-	if(check_packet("error", length, in_packet))
-		debug_packet("error", length, in_packet);
-
-	out_packet[0] = 0;
-	send_packet(handle, 1, out_packet);
-	length = receive_packet(handle, sizeof(in_packet), in_packet);
-	if(check_packet("identify", length, in_packet))
-		debug_packet("identify", length, in_packet);
-
-	out_packet[0] = 0xa0;
-	out_packet[1] = 0x03;
-
-	send_packet(handle, 2, out_packet);
-	length = receive_packet(handle, sizeof(in_packet), in_packet);
-	if(check_packet("pwm_mode", length, in_packet))
-		debug_packet("pwm_mode", length, in_packet);
-}
-
 int main(int argc, char **argv)
 {
 	ssize_t							rv, ix;
@@ -106,6 +90,9 @@ int main(int argc, char **argv)
 	libusb_device_handle			*handle;
 	uint8_t							manufacturer[32];
 	uint8_t							product[32];
+	uint8_t							in_packet[128];
+	uint8_t							out_packet[128];
+	ssize_t							length;
 
 	if((rv = libusb_init(0)) != 0)
 	{
@@ -145,7 +132,7 @@ int main(int argc, char **argv)
 
 		libusb_close(handle);
 
-		if(!strcmp((char *)manufacturer, "slagter.name") && !strcmp((char *)product, "vusb-test"))
+		if(!strcmp((char *)manufacturer, "slagter.name") && !strcmp((char *)product, "attiny861a") && (descriptor.bcdDevice == 0x6041))
 		{
 			libusb_ref_device(device);
 			break;
@@ -185,7 +172,19 @@ int main(int argc, char **argv)
 			return(-1);
 		}
 
-		communicate(handle);
+		for(length = 0; (length < argc - 1) && (length < (sizeof(out_packet) - 1)); length++)
+			out_packet[length] = strtoul(argv[length + 1], 0, 0);
+
+		if(length > 0)
+		{
+			debug_packet("send", length, out_packet);
+			send_packet(handle, length, out_packet);
+			length = receive_packet(handle, sizeof(in_packet), in_packet);
+			if(check_packet("error", length, in_packet))
+				debug_packet("error", length, in_packet);
+			else
+				debug_packet("receive", length, in_packet);
+		}
 
 		if((rv = libusb_release_interface(handle, 0)) < 0)
 		{

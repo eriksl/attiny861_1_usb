@@ -77,7 +77,7 @@ void adc_start(uint8_t source)	// source: 0 = adc6 = pa7, 1 = internal temperatu
 				(0			<< ADIE)	|	// enable interrupt
 				(1			<< ADPS2)	|
 				(1			<< ADPS1)	|
-				(0			<< ADPS0);		// select clock scaler 110 = 64
+				(0			<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
 };
 
 void adc_stop(void)

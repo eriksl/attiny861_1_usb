@@ -5,6 +5,7 @@
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 
 #include "usbdrv.h"
 
@@ -24,7 +25,6 @@ typedef enum
 
 typedef struct
 {
-	uint8_t		duty;
 	pwm_mode_t	pwm_mode:8;
 } pwm_meta_t;
 
@@ -34,175 +34,119 @@ typedef struct
 	uint8_t		state;
 } counter_meta_t;
 
-static	const		ioport_t		*ioport;
-static				pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
-static				pwm_meta_t		pwm_meta[PWM_PORTS];
-static				pwm_meta_t		*pwm_slot;
-static				counter_meta_t	counter_meta[INPUT_PORTS];
+static	pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
+static	pwm_meta_t		pwm_meta[PWM_PORTS];
+static	counter_meta_t	counter_meta[INPUT_PORTS];
 
 static	uint8_t		usb_running;
-static	uint8_t		slot, duty, next_duty;
-static	uint8_t		timer0_value, timer0_debug_1, timer0_debug_2;
+static	uint8_t		duty;
+static	uint8_t		timer0_debug_1, timer0_debug_2;
 
-static uint8_t		receive_buffer[32];
-static uint8_t		receive_buffer_to_fetch	= 0;
-static uint8_t		receive_buffer_length	= 0;
-static uint8_t		receive_buffer_complete	= 0;
+static	uint8_t		receive_buffer[32];
+static	uint8_t		receive_buffer_to_fetch	= 0;
+static	uint8_t		receive_buffer_length	= 0;
+static	uint8_t		receive_buffer_complete	= 0;
 
-static uint8_t		send_buffer[32];
-static uint8_t		send_buffer_sent		= 0;
-static uint8_t		send_buffer_length		= 0;
+static	uint8_t		send_buffer[32];
+static	uint8_t		send_buffer_sent		= 0;
+static	uint8_t		send_buffer_length		= 0;
 
 static void put_word(uint16_t from, uint8_t *to)
 {
-	to += 2;
-
-	*(--to) = from & 0xff;
-	from >>= 8;
-	*(--to) = from & 0xff;
+	to[0] = (from >> 8) & 0xff;
+	to[1] = (from >> 0) & 0xff;
 }
 
 static void put_long(uint32_t from, uint8_t *to)
 {
-	to += 4;
-
-	*(--to) = from & 0xff;
-	from >>= 8;
-	*(--to) = from & 0xff;
-	from >>= 8;
-	*(--to) = from & 0xff;
-	from >>= 8;
-	*(--to) = from & 0xff;
-}
-
-ISR(TIMER0_COMPA_vect) // timer 0 softpwm overflow
-{
-	pwm_slot	= &softpwm_meta[0];
-	ioport		= &output_ports[0];
-
-	for(slot = OUTPUT_PORTS; slot > 0; slot--)
-	{
-		if(pwm_slot->duty == 0)				// pwm duty == 0, port is off, set it off
-			*ioport->port &= ~_BV(ioport->bit);
-		else									// else set the port on
-			*ioport->port |=  _BV(ioport->bit);
-
-		pwm_slot++;
-		ioport++;
-	}
-}
-
-ISR(TIMER0_COMPB_vect) // timer 0 softpwm trigger
-{
-	timer0_value = timer0_get_counter();
-
-	if(timer0_value < 253)
-		timer0_value += 1;
-	else
-		timer0_value = 255;
-
-	next_duty = 255;
-
-	pwm_slot	= &softpwm_meta[0];
-	ioport		= &output_ports[0];
-
-	for(slot = OUTPUT_PORTS; slot > 0; slot--)
-	{
-		if(pwm_slot->duty <= timer0_value)
-			*ioport->port &= ~_BV(ioport->bit);
-		else
-			if(pwm_slot->duty < next_duty)
-				next_duty = pwm_slot->duty;
-
-		pwm_slot++;
-		ioport++;
-	}
-
-	if(next_duty == 255)
-	{
-		next_duty = 255;
-
-		pwm_slot = &softpwm_meta[0];
-
-		for(slot = OUTPUT_PORTS; slot > 0; slot--)
-		{
-			if((pwm_slot->duty != 0) && (pwm_slot->duty < next_duty))
-				next_duty = pwm_slot->duty;
-
-			pwm_slot++;
-		}
-
-		if(next_duty == 255)
-			timer0_stop();
-	}
-
-	timer0_set_trigger(next_duty);
+	to[0] = (from >> 24) & 0xff;
+	to[1] = (from >> 16) & 0xff;
+	to[2] = (from >>  8) & 0xff;
+	to[3] = (from >>  0) & 0xff;
 }
 
 ISR(PCINT_vect, ISR_NOBLOCK)
 {
-	static			uint8_t			pc_dirty, pc_slot;
-	static const	ioport_t		*pc_ioport;
-	static			counter_meta_t	*pc_counter_slot;
+	static uint8_t pc_dirty, pc_slot, mutex = 0;
 
 	if(!usb_running)
 		return;
 
+	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+	{
+		if(mutex)
+			return;
+		mutex = 1;
+	}
+
 	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
 	{
-		pc_ioport		= &input_ports[pc_slot];
-		pc_counter_slot	= &counter_meta[pc_slot];
-
-		if((*pc_ioport->pin & _BV(pc_ioport->bit)) ^ pc_counter_slot->state)
+		if((*input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit)) ^ counter_meta[pc_slot].state)
 		{
-			pc_counter_slot->counter++;
+			counter_meta[pc_slot].counter++;
 			pc_dirty = 1;
 		}
 
-		pc_counter_slot->state = *pc_ioport->pin & _BV(pc_ioport->bit);
+		counter_meta[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
 	}
 
 	if(pc_dirty)
-		*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
+		*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
+
+	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+	{
+		mutex = 0;
+	}
 }
 
-static void update_static_softpwm_ports(void)
+ISR(TIMER0_OVF_vect, ISR_NOBLOCK) // timer 0 softpwm overflow (default normal mode)
 {
-	static pwm_meta_t		*usp_pwm_slot	= &softpwm_meta[0];
-	static const ioport_t	*usp_ioport		= &output_ports[0];
-	static uint8_t			usp_slot;
+	if(timer0_get_compa() == 0)
+		*output_ports[0].port &= ~_BV(output_ports[0].bit);
+	else
+		*output_ports[0].port |=  _BV(output_ports[0].bit);
 
-	for(usp_slot = OUTPUT_PORTS; usp_slot > 0; usp_slot--)
-	{
-		if(usp_pwm_slot->duty == 0)
-			*usp_ioport->port &= ~_BV(usp_ioport->bit);
-		else if(usp_pwm_slot->duty == 255)
-			*usp_ioport->port |= _BV(usp_ioport->bit);
+	if(timer0_get_compb() == 0)
+		*output_ports[1].port &= ~_BV(output_ports[1].bit);
+	else
+		*output_ports[1].port |=  _BV(output_ports[1].bit);
+}
 
-		usp_pwm_slot++;
-		usp_ioport++;
-	}
+ISR(TIMER0_COMPA_vect) // timer 0 softpwm port 1 trigger
+{
+	if(timer0_get_compa() != 0xff)
+		*output_ports[0].port &= ~_BV(output_ports[0].bit);
+}
+
+ISR(TIMER0_COMPB_vect) // timer 0 softpwm port 2 trigger
+{
+	if(timer0_get_compb() != 0xff)
+		*output_ports[1].port &= ~_BV(output_ports[1].bit);
 }
 
 static inline void process_pwmmode(void)
 {
-	static pwm_meta_t	*pm_pwm_slot;
-	static uint8_t		pm_dirty, pm_slot, pm_duty, pm_diff;
-	static uint16_t		pm_duty16, pm_diff16;
+	static uint8_t			pm_slot, pm_duty, pm_diff;
+	static uint16_t			pm_duty16, pm_diff16;
 
-	pm_dirty = 0;
-	pm_pwm_slot = &softpwm_meta[0];
-
-	for(pm_slot = OUTPUT_PORTS; pm_slot > 0; pm_slot--)
+	for(pm_slot = 0; pm_slot < OUTPUT_PORTS; pm_slot++)
 	{
-		pm_duty	= pm_pwm_slot->duty;
+		if(pm_slot == 0)
+			pm_duty = timer0_get_compa();
+		else
+			pm_duty = timer0_get_compb();
+
 		pm_diff	= pm_duty / 10;
 
 		if(pm_diff < 3)
 			pm_diff = 3;
 
-		switch(pm_pwm_slot->pwm_mode)
+		switch(softpwm_meta[pm_slot].pwm_mode)
 		{
+			case(pwm_mode_none):
+			{
+				break;
+			}
 			case(pwm_mode_fade_in):
 			case(pwm_mode_fade_in_out_cont):
 			{
@@ -212,15 +156,16 @@ static inline void process_pwmmode(void)
 				{
 					pm_duty = 255;
 
-					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_in)
-						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					if(softpwm_meta[pm_slot].pwm_mode == pwm_mode_fade_in)
+						softpwm_meta[pm_slot].pwm_mode = pwm_mode_none;
 					else
-						pm_pwm_slot->pwm_mode = pwm_mode_fade_out_in_cont;
+						softpwm_meta[pm_slot].pwm_mode = pwm_mode_fade_out_in_cont;
 				}
 
-				pm_pwm_slot->duty = pm_duty;
-
-				pm_dirty = 1;
+				if(pm_slot == 0)
+					timer0_set_compa(pm_duty);
+				else
+					timer0_set_compb(pm_duty);
 
 				break;
 			}
@@ -234,30 +179,21 @@ static inline void process_pwmmode(void)
 				{
 					pm_duty = 0;
 
-					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_out)
-						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					if(softpwm_meta[pm_slot].pwm_mode == pwm_mode_fade_out)
+						softpwm_meta[pm_slot].pwm_mode = pwm_mode_none;
 					else
-						pm_pwm_slot->pwm_mode = pwm_mode_fade_in_out_cont;
+						softpwm_meta[pm_slot].pwm_mode = pwm_mode_fade_in_out_cont;
 				}
 
-				pm_pwm_slot->duty = pm_duty;
-
-				pm_dirty = 1;
+				if(pm_slot == 0)
+					timer0_set_compa(pm_duty);
+				else
+					timer0_set_compb(pm_duty);
 
 				break;
 			}
 		}
-
-		pm_pwm_slot++;
 	}
-
-	if(pm_dirty)
-	{
-		update_static_softpwm_ports();
-		timer0_start();
-	}
-
-	pm_pwm_slot = &pwm_meta[0];
 
 	for(pm_slot = 0; pm_slot < PWM_PORTS; pm_slot++)
 	{
@@ -267,8 +203,13 @@ static inline void process_pwmmode(void)
 		if(pm_diff16 < 8)
 			pm_diff16 = 8;
 
-		switch(pm_pwm_slot->pwm_mode)
+		switch(pwm_meta[pm_slot].pwm_mode)
 		{
+			case(pwm_mode_none):
+			{
+				break;
+			}
+
 			case(pwm_mode_fade_in):
 			case(pwm_mode_fade_in_out_cont):
 			{
@@ -278,10 +219,10 @@ static inline void process_pwmmode(void)
 				{
 					pm_duty16 = 1020;
 
-					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_in)
-						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					if(pwm_meta[pm_slot].pwm_mode == pwm_mode_fade_in)
+						pwm_meta[pm_slot].pwm_mode = pwm_mode_none;
 					else
-						pm_pwm_slot->pwm_mode = pwm_mode_fade_out_in_cont;
+						pwm_meta[pm_slot].pwm_mode = pwm_mode_fade_out_in_cont;
 				}
 
 				pwm_timer1_set_pwm(pm_slot, pm_duty16);
@@ -298,10 +239,10 @@ static inline void process_pwmmode(void)
 				{
 					pm_duty16 = 0;
 
-					if(pm_pwm_slot->pwm_mode == pwm_mode_fade_out)
-						pm_pwm_slot->pwm_mode = pwm_mode_none;
+					if(pwm_meta[pm_slot].pwm_mode == pwm_mode_fade_out)
+						pwm_meta[pm_slot].pwm_mode = pwm_mode_none;
 					else
-						pm_pwm_slot->pwm_mode = pwm_mode_fade_in_out_cont;
+						pwm_meta[pm_slot].pwm_mode = pwm_mode_fade_in_out_cont;
 				}
 
 				pwm_timer1_set_pwm(pm_slot, pm_duty16);
@@ -309,10 +250,7 @@ static inline void process_pwmmode(void)
 				break;
 			}
 		}
-
-		pm_pwm_slot++;
 	}
-
 }
 
 #if (USE_CRYSTAL == 0)
@@ -360,9 +298,10 @@ static void calibrateOscillator(void)
 void usbEventResetReady(void)
 {
 #if (USE_CRYSTAL == 0)
-	cli(); // usbMeasureFrameLength() counts CPU cycles, so disable interrupts.
-	calibrateOscillator();
-	sei();
+	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+	{
+		calibrateOscillator();
+	}
 #endif
 }
 
@@ -409,6 +348,15 @@ uint8_t usbFunctionRead(uint8_t *data, uint8_t length)
 
 uint8_t usbFunctionWrite(uint8_t *data, uint8_t length)
 {
+#if 0
+	static uint8_t previous_data_token = 0xff;
+
+	if(usbCurrentDataToken == previous_data_token)
+		return(1);
+
+	previous_data_token = usbCurrentDataToken;
+#endif
+
 	if((receive_buffer_length + length) > sizeof(receive_buffer))
 	{
 		receive_buffer_to_fetch = sizeof(receive_buffer);
@@ -513,7 +461,7 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 	uint8_t	command;
 	uint8_t	io;
 
-	*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
+	*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
 
 	if(input_buffer_length < 1)
 		return(build_reply(output_buffer_length, output_buffer, 0, 1, 0, 0));
@@ -538,7 +486,7 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 					} reply =
 					{
 						0x4a, 0xfb,
-						0x06, 0x01, 0x01,
+						0x06, 0x04, 0x01,
 						"attiny861a",
 					};
 
@@ -644,8 +592,7 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			if(io >= INPUT_PORTS)
 				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
 
-			ioport	= &input_ports[io];
-			value	= *ioport->pin & _BV(ioport->bit) ? 0xff : 0x00;
+			value	= *input_ports[io].pin & _BV(input_ports[io].bit) ? 0xff : 0x00;
 
 			return(build_reply(output_buffer_length, output_buffer, input, 0, 1, &value));
 		}
@@ -658,10 +605,12 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			if(io >= OUTPUT_PORTS)
 				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
 
-			softpwm_meta[io].duty = input_buffer[1];
-			update_static_softpwm_ports();
-			timer0_start();
-			duty = softpwm_meta[io].duty;
+			duty = input_buffer[1];
+
+			if(io == 0)
+				timer0_set_compa(duty);
+			else
+				timer0_set_compb(duty);
 
 			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(duty), &duty));
 		}
@@ -671,7 +620,10 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			if(io >= OUTPUT_PORTS)
 				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
 
-			duty = softpwm_meta[io].duty;
+			if(io == 0)
+				duty = timer0_get_compa();
+			else
+				duty = timer0_get_compb();
 
 			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(duty), &duty));
 		}
@@ -788,6 +740,8 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 
 int main(void)
 {
+	uint8_t slot;
+
 	cli();
 
 	PRR =		(0 << 7)		|
@@ -807,51 +761,53 @@ int main(void)
 
 	for(slot = 0; slot < INPUT_PORTS; slot++)
 	{
-		counter_meta_t	*counter_slot;
 
-		ioport					= &input_ports[slot];
-		*ioport->port			&= ~_BV(ioport->bit);
-		*ioport->ddr			&= ~_BV(ioport->bit);
-		*ioport->port			|=  _BV(ioport->bit);
-		*ioport->pcmskreg		|=  _BV(ioport->pcmskbit);
-		GIMSK					|=  _BV(ioport->gimskbit);
+		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit);
+		*input_ports[slot].ddr			&= ~_BV(input_ports[slot].bit);
+		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit);
+		*input_ports[slot].pcmskreg		|=  _BV(input_ports[slot].pcmskbit);
+		GIMSK							|=  _BV(input_ports[slot].gimskbit);
 
-		counter_slot			= &counter_meta[slot];
-		counter_slot->state		= *ioport->pin & _BV(ioport->bit);
-		counter_slot->counter	= 0;
+		counter_meta[slot].state		= *input_ports[slot].pin & _BV(input_ports[slot].bit);
+		counter_meta[slot].counter		= 0;
 	}
 
 	for(slot = 0; slot < OUTPUT_PORTS; slot++)
 	{
-		ioport			= &output_ports[slot];
-		*ioport->ddr	|= _BV(ioport->bit);
-		*ioport->port	&= ~_BV(ioport->bit);
-
-		softpwm_meta[slot].duty		= 0;
+		*output_ports[slot].ddr		|=  _BV(output_ports[slot].bit);
+		*output_ports[slot].port	&= ~_BV(output_ports[slot].bit);
 		softpwm_meta[slot].pwm_mode	= pwm_mode_none;
+	}
+
+	for(slot = 0; slot < USB_PORTS; slot++)
+	{
+		*usb_ports[slot].port	&= ~_BV(usb_ports[slot].bit);
+		*usb_ports[slot].ddr	&= ~_BV(usb_ports[slot].bit);
+		*usb_ports[slot].port	&= ~_BV(usb_ports[slot].bit);
 	}
 
 	for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 	{
-		ioport			= &internal_output_ports[slot];
-		*ioport->ddr	|= _BV(ioport->bit);
-		*ioport->port	&= ~_BV(ioport->bit);
+		*internal_output_ports[slot].ddr	|= _BV(internal_output_ports[slot].bit);
+		*internal_output_ports[slot].port	&= ~_BV(internal_output_ports[slot].bit);
 	}
 
 	for(slot = 0; slot < PWM_PORTS; slot++)
 	{
-		*pwm_ports[slot].ddr 		|= _BV(pwm_ports[slot].bit);
+		*pwm_ports[slot].ddr 		|=  _BV(pwm_ports[slot].bit);
 		*pwm_ports[slot].port		&= ~_BV(pwm_ports[slot].bit);
 		pwm_meta[slot].pwm_mode		= pwm_mode_none;
 	}
 
 	adc_init();
 
-	// 8 mhz / 256 / 256 = 122 Hz
+	// 18 mhz / 256 / 256 = 274 Hz
 	timer0_init(TIMER0_PRESCALER_256);
-	timer0_set_max(0xff);
+	timer0_set_compa(0x00);
+	timer0_set_compb(0x00);
+	timer0_start();
 
-	// 8 mhz / 32 / 1024 = 244 Hz
+	// 18 mhz / 32 / 1024 = 549 Hz
 	pwm_timer1_init(PWM_TIMER1_PRESCALER_32);
 	pwm_timer1_set_max(0x3ff);
 	pwm_timer1_start();
@@ -859,36 +815,34 @@ int main(void)
 	usb_running = 0;
 	usbInit();
 	usbDeviceDisconnect();
+
 	for(duty = 0; duty < 3; duty++)
 	{
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
-			ioport = &internal_output_ports[slot];
-			*ioport->port |= _BV(ioport->bit);
-			_delay_ms(25);
+			*internal_output_ports[slot].port |= _BV(internal_output_ports[slot].bit);
+			_delay_ms(100);
 		}
 
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
-			ioport = &internal_output_ports[slot];
-			*ioport->port &= ~_BV(ioport->bit);
-			_delay_ms(25);
+			*internal_output_ports[slot].port &= ~_BV(internal_output_ports[slot].bit);
+			_delay_ms(100);
 		}
 
-		for(slot = INTERNAL_OUTPUT_PORTS; slot > 0; slot--)
+		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
-			ioport = &internal_output_ports[slot - 1];
-			*ioport->port |= _BV(ioport->bit);
-			_delay_ms(25);
+			*internal_output_ports[slot].port |= _BV(internal_output_ports[slot].bit);
+			_delay_ms(100);
 		}
 
-		for(slot = INTERNAL_OUTPUT_PORTS; slot > 0; slot--)
+		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
-			ioport = &internal_output_ports[slot - 1];
-			*ioport->port &= ~_BV(ioport->bit);
-			_delay_ms(25);
+			*internal_output_ports[slot].port &= ~_BV(internal_output_ports[slot].bit);
+			_delay_ms(100);
 		}
 	}
+
 	usbDeviceConnect();
 
 	sei();
@@ -902,31 +856,31 @@ int main(void)
 		if(usbSofCount > 16)
 		{
 			process_pwmmode();
-			usb_running = 1;
 			ext_sof_count1++;
 			usbSofCount = 0;
 		}
 
 		if(ext_sof_count1 > 4)
 		{
+			usb_running = 1;
 			*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
 			*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
 			ext_sof_count2++;
 			ext_sof_count1 = 0;
 		}
 
-		if(ext_sof_count2 > 8)
+		if(ext_sof_count2 > 32)
 		{
-			*internal_output_ports[2].port ^=  _BV(internal_output_ports[2].bit);
+			*internal_output_ports[1].port ^=  _BV(internal_output_ports[1].bit);
 			ext_sof_count2 = 0;
 		}
 
 		if(receive_buffer_complete)
 		{
+			usbDisableAllRequests();
 			process_input(sizeof(send_buffer), receive_buffer_length, receive_buffer, &send_buffer_length, send_buffer);
+			usbEnableAllRequests();
 			receive_buffer_complete	= 0;
 		}
 	}
-
-	return(0);
 }

@@ -33,7 +33,7 @@ section at the end of this file).
 /* This is the bit number in USB_CFG_IOPORT where the USB D- line is connected.
  * This may be any bit in the port.
  */
-#define USB_CFG_DPLUS_BIT       0
+#define USB_CFG_DPLUS_BIT       1
 /* This is the bit number in USB_CFG_IOPORT where the USB D+ line is connected.
  * This may be any bit in the port. Please note that D+ must also be connected
  * to interrupt pin INT0! [You can also use other interrupts, see section
@@ -144,7 +144,7 @@ section at the end of this file).
  * interrupt/bulk data sent to any endpoint other than 0. The endpoint number
  * can be found in 'usbRxToken'.
  */
-#define USB_CFG_HAVE_FLOWCONTROL        0
+#define USB_CFG_HAVE_FLOWCONTROL        1
 /* Define this to 1 if you want flowcontrol over USB data. See the definition
  * of the macros usbDisableAllRequests() and usbEnableAllRequests() in
  * usbdrv.h.
@@ -199,7 +199,7 @@ section at the end of this file).
  * Please note that Start Of Frame detection works only if D- is wired to the
  * interrupt, not D+. THIS IS DIFFERENT THAN MOST EXAMPLES!
  */
-#define USB_CFG_CHECK_DATA_TOGGLING     0
+#define USB_CFG_CHECK_DATA_TOGGLING     1
 /* define this macro to 1 if you want to filter out duplicate data packets
  * sent by the host. Duplicates occur only as a consequence of communication
  * errors, when the host does not receive an ACK. Please note that you need to
@@ -207,7 +207,11 @@ section at the end of this file).
  * usbFunctionWrite(). Use the global usbCurrentDataToken and a static variable
  * for each control- and out-endpoint to check for duplicate packets.
  */
+#if (USE_CRYSTAL == 0)
 #define USB_CFG_HAVE_MEASURE_FRAME_LENGTH   1
+#else
+#define USB_CFG_HAVE_MEASURE_FRAME_LENGTH   0
+#endif
 /* define this macro to 1 if you want the function usbMeasureFrameLength()
  * compiled in. This function can be used to calibrate the AVR's RC oscillator.
  */
@@ -242,7 +246,7 @@ section at the end of this file).
  * with libusb: 0x16c0/0x5dc.  Use this VID/PID pair ONLY if you understand
  * the implications!
  */
-#define USB_CFG_DEVICE_VERSION  0x00, 0x01
+#define USB_CFG_DEVICE_VERSION  0x41, 0x60
 /* Version number of the device: Minor number first, then major number.
  */
 #define USB_CFG_VENDOR_NAME     's', 'l', 'a', 'g', 't', 'e', 'r', '.', 'n', 'a', 'm', 'e'
@@ -255,14 +259,14 @@ section at the end of this file).
  * obdev's free shared VID/PID pair. See the file USB-IDs-for-free.txt for
  * details.
  */
-#define USB_CFG_DEVICE_NAME     'v', 'u', 's', 'b', '-', 't', 'e', 's', 't'
-#define USB_CFG_DEVICE_NAME_LEN 9
+#define USB_CFG_DEVICE_NAME     'a', 't', 't', 'i', 'n', 'y', '8', '6', '1', 'a'
+#define USB_CFG_DEVICE_NAME_LEN 10
 /* Same as above for the device name. If you don't want a device name, undefine
  * the macros. See the file USB-IDs-for-free.txt before you assign a name if
  * you use a shared VID/PID.
  */
-/*#define USB_CFG_SERIAL_NUMBER   'N', 'o', 'n', 'e' */
-/*#define USB_CFG_SERIAL_NUMBER_LEN   0 */
+/* #define USB_CFG_SERIAL_NUMBER   '0', '6', '0', '4', '0', '1' */
+/* #define USB_CFG_SERIAL_NUMBER_LEN 6 */
 /* Same as above for the serial number. If you don't want a serial number,
  * undefine the macros.
  * It may be useful to provide the serial number through other means than at
@@ -270,8 +274,8 @@ section at the end of this file).
  * to fine tune control over USB descriptors such as the string descriptor
  * for the serial number.
  */
-#define USB_CFG_DEVICE_CLASS        0xff    /* set to 0 if deferred to interface */
-#define USB_CFG_DEVICE_SUBCLASS     0
+#define USB_CFG_DEVICE_CLASS 0xff    /* set to 0 if deferred to interface */
+#define USB_CFG_DEVICE_SUBCLASS 0
 /* See USB specification if you want to conform to an existing device class.
  * Class 0xff is "vendor specific".
  */
@@ -359,7 +363,6 @@ section at the end of this file).
 #define USB_CFG_DESCR_PROPS_HID_REPORT              0
 #define USB_CFG_DESCR_PROPS_UNKNOWN                 0
 
-
 #define usbMsgPtr_t unsigned short
 /* If usbMsgPtr_t is not defined, it defaults to 'uchar *'. We define it to
  * a scalar type here because gcc generates slightly shorter code for scalar
@@ -376,21 +379,7 @@ section at the end of this file).
  * which is not fully supported (such as IAR C) or if you use a differnt
  * interrupt than INT0, you may have to define some of these.
  */
-/* #define USB_INTR_CFG            MCUCR */
-/* #define USB_INTR_CFG_SET        ((1 << ISC00) | (1 << ISC01)) */
-/* #define USB_INTR_CFG_CLR        0 */
-/* #define USB_INTR_ENABLE         GIMSK */
-/* #define USB_INTR_ENABLE_BIT     INT0 */
-/* #define USB_INTR_PENDING        GIFR */
-/* #define USB_INTR_PENDING_BIT    INTF0 */
-/* #define USB_INTR_VECTOR         INT0_vect */
-
-#define USB_INTR_CFG            MCUCR
-#define USB_INTR_CFG_SET        (_BV(ISC00)) | (_BV(ISC01))
-#define USB_INTR_CFG_CLR        0
-#define USB_INTR_ENABLE         GIMSK
 #define USB_INTR_ENABLE_BIT     INT1
-#define USB_INTR_PENDING        GIFR
 #define USB_INTR_PENDING_BIT    INTF1
 #define USB_INTR_VECTOR         INT1_vect
 

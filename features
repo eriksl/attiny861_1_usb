@@ -1,4 +1,4 @@
-MODEL 6 (ATTINY861A), VERSION 1, REVISION 0
+MODEL 6 (ATTINY861A), VERSION 4, REVISION 0
 
 *** COMMANDS ***
 
@@ -53,8 +53,8 @@ MODEL 6 (ATTINY861A), VERSION 1, REVISION 0
 
 			0x00	get digital inputs		returns 1 byte amount, 4 bytes maximum counter value (0 = no counter)
 			0x01	get analog inputs		returns 1 byte amount, 2 bytes mininum value, 2 bytes maximum value
-			0x02	get digital outputs		returns 1 byte amount, 2 bytes maximum pwm value (0 = no pwm)
-			0x03	get pwm outputs			returns 1 byte amount, 2 bytes maximum pwm value
+			0x02	get digital outputs		returns 1 byte amount, 2 bytes minimum pwm value, 2 bytes maximum pwm value (0 = no pwm)
+			0x03	get pwm outputs			returns 1 byte amount, 2 bytes minimum pwm value, 2 bytes maximum pwm value
 
 *** REPLY ***
 
@@ -86,15 +86,15 @@ MODEL 6 (ATTINY861A), VERSION 1, REVISION 0
 	6		GND			V-		GND				X
 	7		pb4					XTAL1			X
 	8		pb5					XTAL2			X
-	9		pb6					PCINT14/PB6		input 1
+	9		pb6					PCINT14/PB6		input 3
 	10		pb7					RESET			X
 	11		pa7					ADC6/AIN1		adc input 1
-	12		pa6					ADC5/AIN0		adc input 2
+	12		pa6					ADC5/AIN0		adc input 2 (tmp36)
 	13		pa5					PCINT5/PA5		input 2
-	14		pa4					PCINT4/PA4		input 3
+	14		pa4					PCINT4/PA4		input 1
 	15		AVcc				AVCC			X
 	16		AGND				AGND			X
-	17		pa3					PA3				input sense led
+	17		pa3					PA3				command sense led / usb heartbeat (green)
 	18		pa2			D-		INT1			USB d-
-	19		pa1					PA1				USB d+
-	20		pa0			D+		PA0				command sense led
+	19		pa1			D+		PA1				USB d+
+	20		pa0					PA0				input sense led (red)
