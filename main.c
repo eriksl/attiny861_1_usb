@@ -582,7 +582,7 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			if(io >= INPUT_PORTS)
 				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
 
-			value	= *input_ports[io].pin & _BV(input_ports[io].bit) ? 0xff : 0x00;
+			value	= *input_ports[io].pin & _BV(input_ports[io].bit) ? 0x00 : 0x01;
 
 			return(build_reply(output_buffer_length, output_buffer, input, 0, 1, &value));
 		}
