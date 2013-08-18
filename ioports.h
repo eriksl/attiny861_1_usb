@@ -37,6 +37,8 @@ typedef struct
 enum
 {
 	ADC_PORTS				= 3,
+	ANALOG_PORTS			= 1,
+	TEMP_PORTS				= 2,
 	INPUT_PORTS				= 3,
 	OUTPUT_PORTS			= 2,
 	USB_PORTS				= 2,

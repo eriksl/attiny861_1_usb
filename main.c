@@ -420,7 +420,7 @@ static void extended_command(uint8_t buffer_size, volatile uint8_t input_buffer_
 
 			case(0x01):	// get analog inputs
 			{
-				control_info.amount = ADC_PORTS;
+				control_info.amount = ANALOG_PORTS;
 				put_word(0x0000, &control_info.data[0]);
 				put_word(0x03ff, &control_info.data[2]);
 				break;
@@ -439,6 +439,14 @@ static void extended_command(uint8_t buffer_size, volatile uint8_t input_buffer_
 				control_info.amount = PWM_PORTS;
 				put_word(0x0000, &control_info.data[0]);
 				put_word(0x03ff, &control_info.data[2]);
+				break;
+			}
+
+			case(0x04):	// get temperature sensors
+			{
+				control_info.amount = TEMP_PORTS;
+				put_word(0xff9c, &control_info.data[0]);
+				put_word(0x0064, &control_info.data[2]);
 				break;
 			}
 
@@ -491,24 +499,6 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 					};
 
 					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(reply), (uint8_t *)&reply));
-				}
-
-				case(0x01):	// 0x02 read ADC
-				{
-					uint16_t value;
-
-					value = ADCW;
-
-					if(ADCSRA & _BV(ADSC))	// conversion not ready
-						return(build_reply(output_buffer_length, output_buffer, input, 5, 0, 0));
-
-					adc_stop();
-
-					uint8_t replystring[2];
-
-					put_word(value, replystring);
-
-					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
 				}
 
 				case(0x02): // 0x02 DEBUG read timer0 counter
@@ -720,13 +710,55 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(mode), &mode));
 		}
 
-		case(0xc0):	// start adc conversion
+		case(0xc0):	// read adc
 		{
-			if(io >= ADC_PORTS)
+			uint16_t value;
+			uint8_t replystring[2];
+
+			if(io >= ANALOG_PORTS)
 				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
 
-			adc_start(io);
-			return(build_reply(output_buffer_length, output_buffer, input, 0, 0, 0));
+			value = adc_read(io);
+
+			put_word(value, replystring);
+
+			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
+		}
+
+		case(0xd0):	// read temperature sensor
+		{
+			uint16_t	value;
+			int32_t		calc_value;
+			uint8_t		replystring[2];
+
+			if(io >= TEMP_PORTS)
+				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+
+			io += ANALOG_PORTS;
+
+			value = adc_read(io);
+
+			if(io == (ANALOG_PORTS + 0)) // TMP36
+			{
+				calc_value	= (int32_t)value;
+				calc_value *= 1000;
+				calc_value /= 961;
+				calc_value -= 500;
+				value       = (uint16_t)calc_value;
+			}
+
+			if(io == (ANALOG_PORTS + 1)) // internal temp ref
+			{
+				calc_value	 = (int32_t)value;
+				calc_value	 = calc_value - 280;
+				calc_value	*= 1000;
+				calc_value	/= 110;
+				value		 = (uint16_t)calc_value;
+			}
+
+			put_word(value, replystring);
+
+			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
 		}
 
 		default:

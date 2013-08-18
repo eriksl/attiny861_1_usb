@@ -21,7 +21,6 @@ MODEL 6 (ATTINY861A), VERSION 4, REVISION 0
 																	BB[5] = firmware version
 																	CC[6] = firmware revision
 																	DD[7] = ascii id string
-			0	0	0	0	0		0	0	1		0x01	read adc, returns 2 bytes
 			0	0	0	0	0		0	1	0		0x02	timer0 counter, returns 1 byte
 			0	0	0	0	0		0	1	1		0x03	timer1 counter, returns 2 bytes
 			0	0	0	0	0		1	1	1		0x07	extended command, rest follows after this byte
@@ -41,7 +40,11 @@ MODEL 6 (ATTINY861A), VERSION 4, REVISION 0
 			1	0	1	0	0						0xa0	write hardpwm mode, supply 1 byte
 			1	0	1	1	0						0xb0	read hardpwm mode, returns 1 byte
 
-			1	1	0	0	0						0xc0	start adc conversion, analog input #
+			1	1	0	0	0						0xc0	read analog input #, returns 2 bytes
+
+			1	1	0	1	0						0xd0	read temperature, returns 2 bytes = 10 * temp
+
+
 
 	softpwm mode =
 			0	on
@@ -51,10 +54,11 @@ MODEL 6 (ATTINY861A), VERSION 4, REVISION 0
 
 	EXTENDED COMMANDS
 
-			0x00	get digital inputs		returns 1 byte amount, 4 bytes maximum counter value (0 = no counter)
-			0x01	get analog inputs		returns 1 byte amount, 2 bytes mininum value, 2 bytes maximum value
-			0x02	get digital outputs		returns 1 byte amount, 2 bytes minimum pwm value, 2 bytes maximum pwm value (0 = no pwm)
-			0x03	get pwm outputs			returns 1 byte amount, 2 bytes minimum pwm value, 2 bytes maximum pwm value
+			0x00	get digital inputs				returns 1 byte amount, 4 bytes maximum counter value (0 = no counter)
+			0x01	get analog inputs				returns 1 byte amount, 2 bytes mininum value, 2 bytes maximum value
+			0x02	get digital outputs				returns 1 byte amount, 2 bytes minimum pwm value, 2 bytes maximum pwm value (0 = no pwm)
+			0x03	get pwm outputs					returns 1 byte amount, 2 bytes minimum pwm value, 2 bytes maximum pwm value
+			0x04	get temperature sensors			returns 1 byte amount, 2 bytes minium temp, 2 bytes max temp
 
 *** REPLY ***
 

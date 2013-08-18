@@ -25,7 +25,7 @@ void adc_init(void)
 
 
 	DIDR0 = 	(1 << ADC6D)	|	// disable digital input adc6
-				(0 << ADC5D)	|
+				(1 << ADC5D)	|	// disable digital input adc5
 				(0 << ADC4D)	|
 				(0 << ADC3D)	|
 				(0 << AREFD)	|
@@ -41,14 +41,24 @@ void adc_init(void)
 				(0 << 2)		|
 				(0 << 1)		|
 				(0 << 0);
+
+	ADCSRA =	(1			<< ADEN)	|	// enable ADC (warm up)
+				(0			<< ADSC)	|	// start conversion
+				(0			<< ADATE)	|	// auto trigger enable
+				(1			<< ADIF)	|	// clear interrupt flag
+				(0			<< ADIE)	|	// enable interrupt
+				(1			<< ADPS2)	|
+				(1			<< ADPS1)	|
+				(1			<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
 }
 
-void adc_start(uint8_t source)	// source: 0 = adc6 = pa7, 1 = internal temperature sensor
+uint16_t adc_read(uint8_t source)
 {
 	const adcport_t * p;
+	uint8_t ix;
 
 	if(source >= ADC_PORTS)
-		return;
+		return(0);
 
 	p = &adc_ports[source];
 
@@ -70,24 +80,31 @@ void adc_start(uint8_t source)	// source: 0 = adc6 = pa7, 1 = internal temperatu
 				(0			<< ADTS1)	|	// auto trigger source (n/a)
 				(0			<< ADTS0);
 
+	for(ix = 0; ix < 16; ix++)
+	{
+		ADCW = 0;
+
+		ADCSRA =	(1			<< ADEN)	|	// enable ADC
+					(1			<< ADSC)	|	// start conversion
+					(0			<< ADATE)	|	// auto trigger enable
+					(1			<< ADIF)	|	// clear interrupt flag
+					(0			<< ADIE)	|	// enable interrupt
+					(1			<< ADPS2)	|
+					(1			<< ADPS1)	|
+					(1			<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
+
+		while(ADCSRA & _BV(ADSC))	// conversion not ready
+			(void)0;
+	}
+
 	ADCSRA =	(1			<< ADEN)	|	// enable ADC
-				(1			<< ADSC)	|	// start conversion
+				(0			<< ADSC)	|	// start conversion
 				(0			<< ADATE)	|	// auto trigger enable
 				(1			<< ADIF)	|	// clear interrupt flag
 				(0			<< ADIE)	|	// enable interrupt
 				(1			<< ADPS2)	|
 				(1			<< ADPS1)	|
-				(0			<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
-};
+				(1			<< ADPS0);		// select clock scaler 111 = 128
 
-void adc_stop(void)
-{
-	ADCSRA =	(0 << ADEN)		|	// enable ADC
-				(0 << ADSC)		|	// start conversion
-				(0 << ADATE)	|	// auto trigger enable
-				(1 << ADIF)		|	// clear interrupt flag
-				(0 << ADIE)		|	// enable interrupt
-				(1 << ADPS2)	|
-				(1 << ADPS1)	|
-				(0 << ADPS0);		// select clock scaler 110 = 64
-};
+	return(ADCW);
+}
