@@ -10,9 +10,9 @@ HEADERS		=		usbconfig.h v-usb/usbdrv/usbdrv.h adc.h v-usb/usbdrv/usbportability.
 HEXFILE		=		$(PROGRAM).hex
 ELFFILE		=		$(PROGRAM).elf
 PROGRAMMED	=		.programmed
-CFLAGS		=		--std=c99 -I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv -Wall -Winline -Os -mmcu=$(MCU) \
-					-DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) \
-					-frename-registers
+CFLAGS		=		--std=c99 -I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv \
+					-Wall -Winline -Os -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) \
+					-fpack-struct -funroll-loops -funit-at-a-time -fno-keep-static-consts -frename-registers
 LDFLAGS		=		-Wall -mmcu=$(MCU)
 
 .PHONY:				all clean hex

@@ -40,8 +40,8 @@ const ioport_t usb_ports[USB_PORTS] =
 
 const ioport_t internal_output_ports[INTERNAL_OUTPUT_PORTS] =
 {
-	{ &PORTA, &PINA, &DDRA, 3 },	// a3	input sense led
-	{ &PORTA, &PINA, &DDRA, 0 },	// a0	command sense led
+	{ &PORTA, &PINA, &DDRA, 3 },	// a3	input sense
+	{ &PORTA, &PINA, &DDRA, 0 },	// a0	command sense
 };
 
 const pwmport_t pwm_ports[PWM_PORTS] =

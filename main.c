@@ -38,9 +38,10 @@ static	pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
 static	pwm_meta_t		pwm_meta[PWM_PORTS];
 static	counter_meta_t	counter_meta[INPUT_PORTS];
 
-static	uint8_t		usb_running;
 static	uint8_t		duty;
 static	uint8_t		timer0_debug_1, timer0_debug_2;
+
+static	uint8_t		usb_running;
 
 static	uint8_t		receive_buffer[32];
 static	uint8_t		receive_buffer_to_fetch	= 0;
@@ -494,7 +495,7 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 					} reply =
 					{
 						0x4a, 0xfb,
-						0x06, 0x04, 0x01,
+						0x06, 0x01, 0x01,
 						"attiny861a",
 					};
 
@@ -743,7 +744,7 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 				calc_value	= (int32_t)value;
 				calc_value *= 1000;
 				calc_value /= 961;
-				calc_value -= 500;
+				calc_value -= (500 - 5);
 				value       = (uint16_t)calc_value;
 			}
 
@@ -793,7 +794,6 @@ int main(void)
 
 	for(slot = 0; slot < INPUT_PORTS; slot++)
 	{
-
 		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit);
 		*input_ports[slot].ddr			&= ~_BV(input_ports[slot].bit);
 		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit);
