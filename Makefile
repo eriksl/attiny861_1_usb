@@ -66,6 +66,13 @@ $(PROGRAM).o:		$(PROGRAM).c $(HEADERS)
 adc.o:				adc.h
 ioports.o:			ioports.h
 timer0.o:			timer0.h
+watchdog.o:			watchdog.h
+clock.o:			clock.h
+eeprom.o:			eeprom.h
+
+v-usb/usbdrv/usbdrv.o:		usbconfig.h v-usb/usbdrv/usbdrv.h v-usb/usbdrv/usbportability.h
+v-usb/usbdrv/usbdrvasm.o:	usbconfig.h v-usb/usbdrv/usbdrv.h v-usb/usbdrv/usbportability.h
+main.o:						usbconfig.h v-usb/usbdrv/usbdrv.h v-usb/usbdrv/usbportability.h
 
 $(ELFFILE):			$(OBJFILES)
 					@echo "LD $(OBJFILES) -> $@"
