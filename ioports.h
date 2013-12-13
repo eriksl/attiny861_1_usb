@@ -5,7 +5,6 @@
 
 typedef struct
 {
-	uint8_t	refs[3];
 	uint8_t	mux[6];
 } adcport_t;
 

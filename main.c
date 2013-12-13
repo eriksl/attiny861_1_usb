@@ -716,8 +716,10 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 			uint16_t value;
 			uint8_t replystring[2];
 
-			if(io >= ANALOG_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			adc_select(&temp_ports[input_io]);
+			adc_warmup	= adc_warmup_init;
+			adc_samples = 0;
+			adc_value	= 0;
 
 			value = adc_read(io);
 
@@ -737,7 +739,8 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 
 			io += ANALOG_PORTS;
 
-			value = adc_read(io);
+			value = get_word(&input_buffer[1]);
+			eeprom_write_uint16(&eeprom->temp_cal[input_io].multiplier, value);
 
 			if(io == (ANALOG_PORTS + 0)) // TMP36
 			{
@@ -768,7 +771,39 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 		}
 	}
 
-	return(build_reply(output_buffer_length, output_buffer, input, 2, 0, 0));
+	return(reply_error(2));
+}
+
+void if_idle(void) // gets called ~1000 Hz
+{
+	static uint16_t led_divisor = 0;
+
+	if(led_divisor > 1000) // 1000 Hz / 1000 = 1 Hz
+	{
+		led_divisor = 0;
+
+		*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
+		if_sense_led  = if_active_led_timeout;
+	}
+
+	led_divisor++;
+
+	if(adc_warmup > 0)
+	{
+		adc_warmup--;
+		adc_start();
+	}
+	else
+	{
+		if(adc_ready() && (adc_samples < 1024))
+		{
+			adc_samples++;
+			adc_value += adc_read();
+			adc_start();
+		}
+	}
+
+	watchdog_reset();
 }
 
 int main(void)
@@ -874,6 +909,13 @@ int main(void)
 			_delay_ms(100);
 		}
 	}
+
+	adc_warmup	= adc_warmup_init;
+	adc_samples	= 0;
+	adc_value	= 0;
+
+	watchdog_setup(WATCHDOG_PRESCALER_1024K);	//	8.0 seconds timeout
+	watchdog_start();
 
 	usbDeviceConnect();
 

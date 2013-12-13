@@ -5,65 +5,60 @@
 
 void adc_init(void)
 {
+	ADCSRA	&=	~_BV(ADEN);			//	disable ADC
+
 	ACSRA =		(1 << ACD)		|	// disable comparator
-				(0 << ACBG)		|	// bandgap select (n/a)
-				(0 << ACO)		|	// enable analog comparator output
+				(0 << ACBG)		|	// !bandgap select (n/a)
+				(0 << ACO)		|	// !enable analog comparator output
 				(1 << ACI)		|	// clear comparator interrupt flag
-				(0 << ACIE)		|	// enable analog comparator interrupt
-				(0 << ACME)		|	// use adc multiplexer
-				(0 << ACIS1)	|	// interrupt mode select (n/a)
+				(0 << ACIE)		|	// !enable analog comparator interrupt
+				(0 << ACME)		|	// !use adc multiplexer
+				(0 << ACIS1)	|	// !interrupt mode select (n/a)
 				(0 << ACIS0);
 
-	ACSRB =		(0 << HSEL)		|	// hysteresis select (n/a)
-				(0 << HLEV)		|	// hysteresis level (n/a)
+	ACSRB =		(0 << HSEL)		|	// !hysteresis select (n/a)
+				(0 << HLEV)		|	// !hysteresis level (n/a)
 				(0 << 5)		|
 				(0 << 4)		|
 				(0 << 3)		|
-				(0 << ACM0)		|	// analog comparator multiplexer (n/a)
-				(0 << ACM1)		|	// analog comparator multiplexer (n/a)
-				(0 << ACM2);		// analog comparator multiplexer (n/a)
+				(0 << ACM0)		|	// !analog comparator multiplexer (n/a)
+				(0 << ACM1)		|	// !analog comparator multiplexer (n/a)
+				(0 << ACM2);		// !analog comparator multiplexer (n/a)
 
+	ADCSRA =	(0	<< ADEN)	|	// !enable ADC
+				(0	<< ADSC)	|	// !start conversion
+				(0	<< ADATE)	|	// !auto trigger enable
+				(1	<< ADIF)	|	// clear interrupt flag
+				(0	<< ADIE)	|	// !enable interrupt
+				(1	<< ADPS2)	|
+				(1	<< ADPS1)	|
+				(1	<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
 
-	DIDR0 = 	(1 << ADC6D)	|	// disable digital input adc6
-				(1 << ADC5D)	|	// disable digital input adc5
-				(0 << ADC4D)	|
-				(0 << ADC3D)	|
-				(0 << AREFD)	|
-				(0 << ADC2D)	|
-				(0 << ADC1D)	|
-				(0 << ADC0D);
+	ADCSRB	=	(0	<< BIN)		|	// !bipolair input
+				(0	<< GSEL)	|	// gain select (n/a)
+				(0	<< 5)		|	// reserved
+				(0	<< REFS2)	|	// 1.1V internal ref
+				(0	<< MUX5)	|	// input 1.1V
+				(0	<< ADTS2)	|
+				(0	<< ADTS1)	|	// auto trigger source (n/a)
+				(0	<< ADTS0);
 
-	DIDR1 =		(0 << ADC10D)	|
-				(0 << ADC9D)	|
-				(0 << ADC8D)	|
-				(0 << ADC7D)	|
-				(0 << 3)		|	// reserved
-				(0 << 2)		|
-				(0 << 1)		|
-				(0 << 0);
+	ADMUX	=	(1	<< REFS1)	|	// 1.1V internal ref
+				(0	<< REFS0)	|	// 1.1V internal ref
+				(0	<< ADLAR)	|	// right adjust result
+				(1	<< MUX4)	|	// input 1.1V
+				(1	<< MUX3)	|	// input 1.1V
+				(1	<< MUX2)	|	// input 1.1V
+				(1	<< MUX1)	|	// input 1.1V
+				(0	<< MUX0);		// input 1.1V
 
-	ADCSRA =	(1			<< ADEN)	|	// enable ADC (warm up)
-				(0			<< ADSC)	|	// start conversion
-				(0			<< ADATE)	|	// auto trigger enable
-				(1			<< ADIF)	|	// clear interrupt flag
-				(0			<< ADIE)	|	// enable interrupt
-				(1			<< ADPS2)	|
-				(1			<< ADPS1)	|
-				(1			<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
+	ADCSRA	|=	_BV(ADEN);			//	enable ADC
 }
 
-uint16_t adc_read(uint8_t source)
+void adc_select(const adcport_t *p)
 {
-	const adcport_t * p;
-	uint8_t ix;
-
-	if(source >= ADC_PORTS)
-		return(0);
-
-	p = &adc_ports[source];
-
-	ADMUX	=	(p->refs[1]	<< REFS1)	|	// Vref
-				(p->refs[0]	<< REFS0)	|
+	ADMUX	=	(1			<< REFS1)	|	// 1.1V internal ref
+				(0			<< REFS0)	|	// 1.1V internal ref
 				(0			<< ADLAR)	|	// right adjust result
 				(p->mux[4]	<< MUX4)	|
 				(p->mux[3]	<< MUX3)	|
@@ -74,37 +69,11 @@ uint16_t adc_read(uint8_t source)
 	ADCSRB	=	(0			<< BIN)		|	// unipolair input
 				(0			<< GSEL)	|	// gain select (n/a)
 				(0			<< 5)		|	// reserved
-				(p->refs[2]	<< REFS2)	|
+				(0			<< REFS2)	|	// 1.1V internal ref
 				(p->mux[5]	<< MUX5)	|
 				(0			<< ADTS2)	|
 				(0			<< ADTS1)	|	// auto trigger source (n/a)
 				(0			<< ADTS0);
 
-	for(ix = 0; ix < 16; ix++)
-	{
-		ADCW = 0;
-
-		ADCSRA =	(1			<< ADEN)	|	// enable ADC
-					(1			<< ADSC)	|	// start conversion
-					(0			<< ADATE)	|	// auto trigger enable
-					(1			<< ADIF)	|	// clear interrupt flag
-					(0			<< ADIE)	|	// enable interrupt
-					(1			<< ADPS2)	|
-					(1			<< ADPS1)	|
-					(1			<< ADPS0);		// select clock scaler 111 = 128 = ADC runs on 140 kHz.
-
-		while(ADCSRA & _BV(ADSC))	// conversion not ready
-			(void)0;
-	}
-
-	ADCSRA =	(1			<< ADEN)	|	// enable ADC
-				(0			<< ADSC)	|	// start conversion
-				(0			<< ADATE)	|	// auto trigger enable
-				(1			<< ADIF)	|	// clear interrupt flag
-				(0			<< ADIE)	|	// enable interrupt
-				(1			<< ADPS2)	|
-				(1			<< ADPS1)	|
-				(1			<< ADPS0);		// select clock scaler 111 = 128
-
-	return(ADCW);
+	ADCW = 0;
 }
