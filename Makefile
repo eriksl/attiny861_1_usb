@@ -1,17 +1,43 @@
+# BOARD = 0		production
+# BOARD = 1		testboard 1 (rc oscillator)
+# BOARD = 2		testboard 2 (crystal)
+
+BOARD =	2
+
+ifeq ($(BOARD), 0)
+	USE_CRYSTAL	= 1
+	USE_PLL		= 0
+	MCUSPEED	= 18000000
+	LFUSE		= 0xff
+	HFUSE		= 0xd5
+endif
+ifeq ($(BOARD), 1)
+	USE_CRYSTAL	= 0
+	USE_PLL		= 0
+	MCUSPEED	= 12800000
+	LFUSE		= 0xe2
+	HFUSE		= 0xd5
+endif
+ifeq ($(BOARD), 2)
+	USE_CRYSTAL	= 1
+	USE_PLL		= 0
+	MCUSPEED	= 18000000
+	LFUSE		= 0xff
+	HFUSE		= 0xd5
+endif
+
 MCU			=		attiny861
-USE_CRYSTAL	=		1
-MCUSPEED	=		18000000
 PROGRAMMER	=		dragon_isp
 PRGFLAGS	=		-b 0 -P usb
 
 PROGRAM		=		main
-OBJFILES	=		v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o adc.o ioports.o timer0.o pwm_timer1.o $(PROGRAM).o
-HEADERS		=		usbconfig.h v-usb/usbdrv/usbdrv.h adc.h v-usb/usbdrv/usbportability.h ioports.h timer0.h pwm_timer1.h
+OBJFILES	=		adc.o ioports.o timer0.o pwm_timer1.o watchdog.o eeprom.o clock.o v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o $(PROGRAM).o
+HEADERS		=		adc.h ioports.h timer0.h pwm_timer1.h watchdog.h eeprom.h clock.h usbconfig.h v-usb/usbdrv/usbdrv.h v-usb/usbdrv/usbportability.h
 HEXFILE		=		$(PROGRAM).hex
 ELFFILE		=		$(PROGRAM).elf
 PROGRAMMED	=		.programmed
-CFLAGS		=		--std=c99 -I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv \
-					-Wall -Winline -Os -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) \
+CFLAGS		=		-I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv \
+					--std=c99 -Wall -Winline -Os -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) -DUSE_PLL=$(USE_PLL) -DBOARD=$(BOARD) \
 					-fpack-struct -funroll-loops -funit-at-a-time -fno-keep-static-consts -frename-registers
 LDFLAGS		=		-Wall -mmcu=$(MCU)
 

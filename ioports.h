@@ -34,23 +34,49 @@ typedef struct
 	volatile	uint8_t		*compare_reg_low;
 } pwmport_t;
 
+#if (BOARD == 0)
 enum
 {
-	ADC_PORTS				= 3,
-	ANALOG_PORTS			= 1,
 	TEMP_PORTS				= 2,
+	ANALOG_PORTS			= 1,
 	INPUT_PORTS				= 3,
 	OUTPUT_PORTS			= 2,
 	USB_PORTS				= 2,
 	INTERNAL_OUTPUT_PORTS	= 2,
 	PWM_PORTS				= 2
 };
+#endif
+#if (BOARD == 1)
+enum
+{
+	TEMP_PORTS				= 2,
+	ANALOG_PORTS			= 1,
+	INPUT_PORTS				= 2,
+	OUTPUT_PORTS			= 1,
+	USB_PORTS				= 2,
+	INTERNAL_OUTPUT_PORTS	= 2,
+	PWM_PORTS				= 2
+};
+#endif
+#if (BOARD == 2)
+enum
+{
+	TEMP_PORTS				= 1,
+	ANALOG_PORTS			= 0,
+	INPUT_PORTS				= 0,
+	OUTPUT_PORTS			= 6,
+	USB_PORTS				= 2,
+	INTERNAL_OUTPUT_PORTS	= 2,
+	PWM_PORTS				= 0
+};
+#endif
 
-extern const adcport_t	adc_ports[];
+extern const adcport_t	temp_ports[];
+extern const adcport_t	analog_ports[];
 extern const ioport_t	input_ports[];
 extern const ioport_t	output_ports[];
-extern const ioport_t	usb_ports[];
 extern const ioport_t	internal_output_ports[];
 extern const pwmport_t	pwm_ports[];
+extern const ioport_t	usb_ports[];
 
 #endif
