@@ -1,18 +1,27 @@
 #include <stdint.h>
-#include <string.h>
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
-#include <avr/sleep.h>
 #include <util/delay.h>
-#include <util/atomic.h>
+#include <string.h>
 
 #include "usbdrv.h"
 
+#include "clock.h"
+#include "eeprom.h"
 #include "ioports.h"
 #include "adc.h"
 #include "timer0.h"
 #include "pwm_timer1.h"
+#include "watchdog.h"
+
+enum
+{
+	adc_warmup_init = 8,
+	command_led_timeout = 8,
+	if_active_led_timeout = 2,
+	buffer_size = 32
+};
 
 typedef enum
 {
@@ -34,21 +43,77 @@ typedef struct
 	uint8_t		state;
 } counter_meta_t;
 
+static	uint8_t	const *input_buffer;
+static	uint8_t	input_buffer_length;
+static	uint8_t	*output_buffer;
+static	uint8_t	*output_buffer_length;
+
 static	pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
 static	pwm_meta_t		pwm_meta[PWM_PORTS];
 static	counter_meta_t	counter_meta[INPUT_PORTS];
 
-static	uint8_t		duty;
-static	uint8_t		timer0_debug_1, timer0_debug_2;
+static	uint8_t	duty;
+static	uint8_t	init_counter = 0;
+static	uint8_t	if_sense_led, input_sense_led;
 
-static	uint8_t		usb_running;
+static	uint8_t	input_byte;
+static	uint8_t	input_command;
+static	uint8_t	input_io;
 
-static	uint8_t		receive_buffer[32];
+static	int16_t	temp_cal_multiplier;
+static	int16_t	temp_cal_offset;
+
+static	uint8_t		adc_warmup;
+static	uint16_t	adc_samples;
+static	uint32_t	adc_value;
+
+typedef struct 
+{
+	uint16_t	multiplier;
+	uint16_t	offset;
+} eeprom_temp_cal_t;
+
+typedef struct
+{
+	eeprom_temp_cal_t temp_cal[8];
+} eeprom_t;
+
+static eeprom_t *eeprom = (eeprom_t *)0;
+
+static uint16_t get_word(const uint8_t *from)
+{
+	uint16_t result;
+
+	result = from[0];
+	result <<= 8;
+	result |= from[1];
+
+	return(result);
+}
+
+#if 0
+static uint32_t get_long(const uint8_t *from)
+{
+	uint32_t result;
+
+	result = from[0];
+	result <<= 8;
+	result |= from[1];
+	result <<= 8;
+	result |= from[2];
+	result <<= 8;
+	result |= from[3];
+
+	return(result);
+}
+#endif
+
+static	uint8_t		receive_buffer[buffer_size];
 static	uint8_t		receive_buffer_to_fetch	= 0;
 static	uint8_t		receive_buffer_length	= 0;
 static	uint8_t		receive_buffer_complete	= 0;
 
-static	uint8_t		send_buffer[32];
+static	uint8_t		send_buffer[buffer_size];
 static	uint8_t		send_buffer_sent		= 0;
 static	uint8_t		send_buffer_length		= 0;
 
@@ -64,65 +129,6 @@ static void put_long(uint32_t from, uint8_t *to)
 	to[1] = (from >> 16) & 0xff;
 	to[2] = (from >>  8) & 0xff;
 	to[3] = (from >>  0) & 0xff;
-}
-
-ISR(PCINT_vect, ISR_NOBLOCK)
-{
-	static uint8_t pc_dirty, pc_slot, mutex = 0;
-
-	if(!usb_running)
-		return;
-
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-	{
-		if(mutex)
-			return;
-		mutex = 1;
-	}
-
-	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
-	{
-		if((*input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit)) ^ counter_meta[pc_slot].state)
-		{
-			counter_meta[pc_slot].counter++;
-			pc_dirty = 1;
-		}
-
-		counter_meta[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
-	}
-
-	if(pc_dirty)
-		*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
-
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-	{
-		mutex = 0;
-	}
-}
-
-ISR(TIMER0_OVF_vect, ISR_NOBLOCK) // timer 0 softpwm overflow (default normal mode)
-{
-	if(timer0_get_compa() == 0)
-		*output_ports[0].port &= ~_BV(output_ports[0].bit);
-	else
-		*output_ports[0].port |=  _BV(output_ports[0].bit);
-
-	if(timer0_get_compb() == 0)
-		*output_ports[1].port &= ~_BV(output_ports[1].bit);
-	else
-		*output_ports[1].port |=  _BV(output_ports[1].bit);
-}
-
-ISR(TIMER0_COMPA_vect) // timer 0 softpwm port 1 trigger
-{
-	if(timer0_get_compa() != 0xff)
-		*output_ports[0].port &= ~_BV(output_ports[0].bit);
-}
-
-ISR(TIMER0_COMPB_vect) // timer 0 softpwm port 2 trigger
-{
-	if(timer0_get_compb() != 0xff)
-		*output_ports[1].port &= ~_BV(output_ports[1].bit);
 }
 
 static inline void process_pwmmode(void)
@@ -254,6 +260,87 @@ static inline void process_pwmmode(void)
 	}
 }
 
+ISR(PCINT_vect)
+{
+	static uint8_t pc_dirty, pc_slot;
+
+	if(init_counter < 16)	// discard spurious first few interrupts
+		return;
+
+	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
+	{
+		if((*input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit)) ^ counter_meta[pc_slot].state)
+		{
+			counter_meta[pc_slot].counter++;
+			pc_dirty = 1;
+		}
+
+		counter_meta[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
+	}
+
+	sei();
+
+	if(pc_dirty)
+	{
+		*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
+		input_sense_led = command_led_timeout;
+	}
+}
+
+ISR(TIMER0_OVF_vect) // timer 0 softpwm overflow (default normal mode) (244 Hz)
+{
+	static uint8_t pwm_divisor = 0;
+
+	sei();
+
+	if(timer0_get_compa() == 0)
+		*output_ports[0].port &= ~_BV(output_ports[0].bit);
+	else
+		*output_ports[0].port |=  _BV(output_ports[0].bit);
+
+	if(timer0_get_compb() == 0)
+		*output_ports[1].port &= ~_BV(output_ports[1].bit);
+	else
+		*output_ports[1].port |=  _BV(output_ports[1].bit);
+
+	if(init_counter < 255)
+		init_counter++;
+
+	if(++pwm_divisor > 4)
+	{
+		process_pwmmode();
+		pwm_divisor = 0;
+	}
+
+	if(if_sense_led == 1)
+		*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
+
+	if(if_sense_led > 0)
+		if_sense_led--;
+
+	if(input_sense_led == 1)
+		*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
+
+	if(input_sense_led > 0)
+		input_sense_led--;
+}
+
+ISR(TIMER0_COMPA_vect) // timer 0 softpwm port 1 trigger
+{
+	sei();
+
+	if(timer0_get_compa() != 0xff)
+		*output_ports[0].port &= ~_BV(output_ports[0].bit);
+}
+
+ISR(TIMER0_COMPB_vect) // timer 0 softpwm port 2 trigger
+{
+	sei();
+
+	if(timer0_get_compb() != 0xff)
+		*output_ports[1].port &= ~_BV(output_ports[1].bit);
+}
+
 #if (USE_CRYSTAL == 0)
 static void calibrateOscillator(void)
 {
@@ -262,6 +349,8 @@ static void calibrateOscillator(void)
 	uint16_t	x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
 
 	/* do a binary search: */
+
+	cli();
 
 	do
 	{
@@ -293,17 +382,18 @@ static void calibrateOscillator(void)
 	}
 
 	OSCCAL = optimumValue;
+
+	sei();
+}
+#else
+static void calibrateOscillator(void)
+{
 }
 #endif
 
 void usbEventResetReady(void)
 {
-#if (USE_CRYSTAL == 0)
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-	{
-		calibrateOscillator();
-	}
-#endif
+	calibrateOscillator();
 }
 
 usbMsgLen_t usbFunctionSetup(uchar data[8])
@@ -377,113 +467,134 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t length)
 	return(0);
 }
 
-static void build_reply(uint8_t volatile *output_length, volatile uint8_t *output,
-		uint8_t command, uint8_t error_code, uint8_t reply_length, const uint8_t *reply_string)
+static void reply(uint8_t error_code, uint8_t reply_length, const uint8_t *reply_string)
 {
 	uint8_t checksum;
 	uint8_t ix;
 
-	output[0] = 3 + reply_length;
-	output[1] = error_code;
-	output[2] = command;
+	if((reply_length + 4) > buffer_size)
+		return;
+
+	output_buffer[0] = 3 + reply_length;
+	output_buffer[1] = error_code;
+	output_buffer[2] = input_byte;
 
 	for(ix = 0; ix < reply_length; ix++)
-		output[3 + ix] = reply_string[ix];
+		output_buffer[3 + ix] = reply_string[ix];
 
 	for(ix = 1, checksum = 0; ix < (3 + reply_length); ix++)
-		checksum += output[ix];
+		checksum += output_buffer[ix];
 
-	output[3 + reply_length] = checksum;
-	*output_length = 3 + reply_length + 1;
+	output_buffer[3 + reply_length] = checksum;
+	*output_buffer_length = 3 + reply_length + 1;
 }
 
-static void extended_command(uint8_t buffer_size, volatile uint8_t input_buffer_length, const volatile uint8_t *input_buffer,
-						uint8_t volatile *output_buffer_length, volatile uint8_t *output_buffer)
+static void reply_char(uint8_t value)
 {
-	uint8_t command = input_buffer[1];
+	reply(0, sizeof(value), &value);
+}
 
-	if(command < 5)
+static void reply_short(uint16_t value)
+{
+	uint8_t reply_string[sizeof(value)];
+
+	put_word(value, reply_string);
+
+	reply(0, sizeof(reply_string), reply_string);
+}
+
+static void reply_long(uint32_t value)
+{
+	uint8_t reply_string[sizeof(value)];
+
+	put_long(value, reply_string);
+
+	reply(0, sizeof(reply_string), reply_string);
+}
+
+static void reply_error(uint8_t error_code)
+{
+	reply(error_code, 0, 0);
+}
+
+static void extended_command()
+{
+	struct
 	{
-		struct
+		uint8_t	amount;
+		uint8_t	data[4];
+	} control_info;
+
+	switch(input_buffer[1])
+	{
+		case(0x00):	// get digital inputs
 		{
-			uint8_t	amount;
-			uint8_t	data[4];
-		} control_info;
-
-		switch(input_buffer[1])
-		{
-			case(0x00):	// get digital inputs
-			{
-				control_info.amount = INPUT_PORTS;
-				put_long(0x3fffffff, &control_info.data[0]);
-				break;
-			}
-
-			case(0x01):	// get analog inputs
-			{
-				control_info.amount = ANALOG_PORTS;
-				put_word(0x0000, &control_info.data[0]);
-				put_word(0x03ff, &control_info.data[2]);
-				break;
-			}
-
-			case(0x02):	// get digital outputs
-			{
-				control_info.amount = OUTPUT_PORTS;
-				put_word(0x0000, &control_info.data[0]);
-				put_word(0x00ff, &control_info.data[2]);
-				break;
-			}
-
-			case(0x03):	// get pwm outputs
-			{
-				control_info.amount = PWM_PORTS;
-				put_word(0x0000, &control_info.data[0]);
-				put_word(0x03ff, &control_info.data[2]);
-				break;
-			}
-
-			case(0x04):	// get temperature sensors
-			{
-				control_info.amount = TEMP_PORTS;
-				put_word(0xff9c, &control_info.data[0]);
-				put_word(0x0064, &control_info.data[2]);
-				break;
-			}
-
-			default:
-			{
-				return(build_reply(output_buffer_length, output_buffer, input_buffer[0], 7, 0, 0));
-			}
+			control_info.amount = INPUT_PORTS;
+			put_long(0x3fffffff, &control_info.data[0]);
+			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
 		}
 
-		return(build_reply(output_buffer_length, output_buffer, input_buffer[0], 0, sizeof(control_info), (uint8_t *)&control_info));
+		case(0x01):	// get analog inputs
+		{
+			control_info.amount = ANALOG_PORTS;
+			put_word(0x0000, &control_info.data[0]);
+			put_word(0x03ff, &control_info.data[2]);
+			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
+		}
+
+		case(0x02):	// get digital outputs
+		{
+			control_info.amount = OUTPUT_PORTS;
+			put_word(0x0000, &control_info.data[0]);
+			put_word(0x00ff, &control_info.data[2]);
+			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
+		}
+
+		case(0x03):	// get pwm outputs
+		{
+			control_info.amount = PWM_PORTS;
+			put_word(0x0000, &control_info.data[0]);
+			put_word(0x03ff, &control_info.data[2]);
+			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
+		}
+
+		case(0x04):	// get temperature sensors
+		{
+			control_info.amount = TEMP_PORTS;
+			put_long(0x00, &control_info.data[0]);
+			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
+		}
 	}
 
-	return(build_reply(output_buffer_length, output_buffer, input_buffer[0], 7, 0, 0));
+	return(reply_error(7));
 }
 
-static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_length, const volatile uint8_t *input_buffer,
-						uint8_t volatile *output_buffer_length, volatile uint8_t *output_buffer)
+static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, const uint8_t *if_input_buffer,
+						uint8_t *if_output_buffer_length, uint8_t *if_output_buffer)
 {
-	uint8_t input;
-	uint8_t	command;
-	uint8_t	io;
-
 	*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
+	if_sense_led = command_led_timeout;
+
+	input_buffer_length		= if_input_buffer_length;
+	input_buffer			= if_input_buffer;
+
+	output_buffer_length	= if_output_buffer_length;
+	output_buffer			= if_output_buffer;
 
 	if(input_buffer_length < 1)
-		return(build_reply(output_buffer_length, output_buffer, 0, 1, 0, 0));
+		return(reply_error(1));
 
-	input	= input_buffer[0];
-	command	= input & 0xf8;
-	io		= input & 0x07;
+	input_byte		= input_buffer[0];
+	input_command	= input_byte & 0xf8;
+	input_io		= input_byte & 0x07;
 
-	switch(command)
+	watchdog_reset();
+
+	switch(input_command)
 	{
 		case(0x00):	// short / no-io
 		{
-			switch(io)
+			switch(input_io)
 			{
 				case(0x00):	// identify
 				{
@@ -492,67 +603,70 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 						uint8_t id1, id2;
 						uint8_t model, version, revision;
 						uint8_t name[16];
-					} reply =
+					} id =
 					{
 						0x4a, 0xfb,
-						0x06, 0x01, 0x01,
+						0x06, 0x01, 0x05,
 						"attiny861a",
 					};
 
-					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(reply), (uint8_t *)&reply));
+					return(reply(0, sizeof(id), (uint8_t *)&id));
 				}
 
-				case(0x02): // 0x02 DEBUG read timer0 counter
+				case(0x01):	// read analog input
 				{
-					uint8_t value = timer0_get_counter();
-					return(build_reply(output_buffer_length, output_buffer, input, 0, 1, &value));
+					uint8_t reply_string[6];
+
+					put_word(adc_samples, &reply_string[0]);
+					put_long(adc_value, &reply_string[2]);
+					adc_warmup	= adc_warmup_init;
+					adc_samples = 0;
+					adc_value	= 0;
+
+					return(reply(0, sizeof(reply_string), reply_string));
 				}
 
-				case(0x03): // 0x03 DEBUG read timer1 counter
+				case(0x02):	// read temperature sensor
 				{
-					uint16_t value = pwm_timer1_get_counter();
-					uint8_t replystring[2];
+					int32_t	value;
+					int32_t	samples;
 
-					put_word(value, replystring);
+					uint8_t reply_string[8];
 
-					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
+					value	= (int32_t)adc_value;
+					samples	= (int32_t)adc_samples;
+
+					value	*= 10;
+					value	*= temp_cal_multiplier;
+					value	/= samples;
+					value	/= 1000;
+					value	+= temp_cal_offset;
+
+					put_word(value, &reply_string[0]);
+					put_word(adc_samples, &reply_string[2]);
+					put_long(adc_value, &reply_string[4]);
+
+					adc_warmup	= adc_warmup_init;
+					adc_samples = 0;
+					adc_value	= 0;
+
+					return(reply(0, sizeof(reply_string), reply_string));
 				}
 
-				case(0x04): // 0x04 DEBUG read timer1 max
+				case(0x06): // test watchdog
 				{
-					uint16_t value = pwm_timer1_get_max();
-					uint8_t replystring[2];
-
-					put_word(value, replystring);
-
-					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
-				}
-
-				case(0x05): // 0x05 read timer1 prescaler
-				{
-					uint8_t value = pwm_timer1_status();
-
-					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(value), &value));
-				}
-
-				case(0x06): // 0x06 DEBUG read timer0 entry / exit counter values
-				{
-					uint8_t value[2];
-
-					value[0] = timer0_debug_1;
-					value[1] = timer0_debug_2;
-
-					return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(value), value));
+					for(;;)
+						(void)0;
 				}
 
 				case(0x07): // extended command
 				{
-					return(extended_command(buffer_size, input_buffer_length, input_buffer, output_buffer_length, output_buffer));
+					return(extended_command());
 				}
 
 				default:
 				{
-					return(build_reply(output_buffer_length, output_buffer, input, 7, 0, 0));
+					return(reply_error(7));
 				}
 			}
 
@@ -562,153 +676,148 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 		case(0x10):	// 0x10 read counter
 		case(0x20): // 0x20 read / reset counter
 		{
-			if(io >= INPUT_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= INPUT_PORTS)
+				return(reply_error(3));
 
-			uint8_t		replystring[4];
-			uint32_t	counter = counter_meta[io].counter;
+			uint32_t counter = counter_meta[input_io].counter;
 
-			if(command == 0x20)
-				counter_meta[io].counter = 0;
+			if(input_command == 0x20)
+				counter_meta[input_io].counter = 0;
 
-			put_long(counter, replystring);
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
+			return(reply_long(counter));
 		}
 
 		case(0x30):	//	read input
 		{
 			uint8_t value;
 
-			if(io >= INPUT_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= INPUT_PORTS)
+				return(reply_error(3));
 
-			value	= *input_ports[io].pin & _BV(input_ports[io].bit) ? 0x00 : 0x01;
+			value = *input_ports[input_io].pin & _BV(input_ports[input_io].bit) ? 0x00 : 0x01;
 
-			return(build_reply(output_buffer_length, output_buffer, input, 0, 1, &value));
+			return(reply_char(value));
 		}
 
 		case(0x40):	//	write output / softpwm
 		{
+			uint8_t value;
+
 			if(input_buffer_length < 2)
-				return(build_reply(output_buffer_length, output_buffer, input, 4, 0, 0));
+				return(reply_error(4));
 
-			if(io >= OUTPUT_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= OUTPUT_PORTS)
+				return(reply_error(3));
 
-			duty = input_buffer[1];
+			value = input_buffer[1];
 
-			if(io == 0)
-				timer0_set_compa(duty);
+			if(input_io == 0)
+				timer0_set_compa(value);
 			else
-				timer0_set_compb(duty);
+				timer0_set_compb(value);
 
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(duty), &duty));
+			return(reply_char(value));
 		}
 
 		case(0x50):	// read output / softpwm
 		{
-			if(io >= OUTPUT_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			uint8_t value;
 
-			if(io == 0)
-				duty = timer0_get_compa();
+			if(input_io >= OUTPUT_PORTS)
+				return(reply_error(3));
+
+			if(input_io == 0)
+				value = timer0_get_compa();
 			else
-				duty = timer0_get_compb();
+				value = timer0_get_compb();
 
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(duty), &duty));
+			return(reply_char(value));
 		}
 
 		case(0x60): // write softpwm mode
 		{
 			if(input_buffer_length < 2)
-				return(build_reply(output_buffer_length, output_buffer, input, 4, 0, 0));
+				return(reply_error(4));
 
-			if(io >= OUTPUT_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= OUTPUT_PORTS)
+				return(reply_error(3));
 
-			uint8_t mode = input_buffer[1];
+			if(input_buffer[1] > 3)
+				return(reply_error(3));
 
-			if(mode > 3)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			softpwm_meta[input_io].pwm_mode = input_buffer[1];
 
-			softpwm_meta[io].pwm_mode = mode;
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(mode), &mode));
+			return(reply_char(input_buffer[1]));
 		}
 
 		case(0x70):	// read softpwm mode
 		{
-			if(io >= OUTPUT_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= OUTPUT_PORTS)
+				return(reply_error(3));
 
-			uint8_t mode;
-
-			mode = softpwm_meta[io].pwm_mode;
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(mode), &mode));
+			return(reply_char(softpwm_meta[input_io].pwm_mode));
 		}
 
 		case(0x80): // write pwm
 		{
-			if(input_buffer_length < 3)
-				return(build_reply(output_buffer_length, output_buffer, input, 4, 0, 0));
-
-			if(io >= PWM_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
-
 			uint16_t value;
 
-			value = input_buffer[1];
-			value <<= 8;
-			value |= input_buffer[2];
+			if(input_buffer_length < 3)
+				return(reply_error(4));
 
-			pwm_timer1_set_pwm(io, value);
+			if(input_io >= PWM_PORTS)
+				return(reply_error(3));
 
-			return(build_reply(output_buffer_length, output_buffer, input, 0, 0, 0));
+			value = get_word(&input_buffer[1]);
+
+			pwm_timer1_set_pwm(input_io, value);
+
+			return(reply_short(value));
 		}
 
 		case(0x90): // read pwm
 		{
-			if(io >= PWM_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= PWM_PORTS)
+				return(reply_error(3));
 
-			uint16_t value = pwm_timer1_get_pwm(io);
-			uint8_t reply[2];
-
-			put_word(value, reply);
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(reply), reply));
+			return(reply_short(pwm_timer1_get_pwm(input_io)));
 		}
 
 		case(0xa0): // write pwm mode
 		{
 			if(input_buffer_length < 2)
-				return(build_reply(output_buffer_length, output_buffer, input, 4, 0, 0));
+				return(reply_error(4));
 
-			if(io >= PWM_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= PWM_PORTS)
+				return(reply_error(3));
 
-			uint8_t mode = input_buffer[1];
+			if(input_buffer[1] > 3)
+				return(reply_error(3));
 
-			if(mode > 3)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			pwm_meta[input_io].pwm_mode = input_buffer[1];
 
-			pwm_meta[io].pwm_mode = mode;
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(mode), &mode));
+			return(reply_char(input_buffer[1]));
 		}
 
 		case(0xb0):	// read pwm mode
 		{
-			if(io >= PWM_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= PWM_PORTS)
+				return(reply_error(3));
 
-			uint8_t mode;
+			return(reply_char(pwm_meta[input_io].pwm_mode));
+		}
 
-			mode = pwm_meta[io].pwm_mode;
+		case(0xc0):	// select adc
+		{
+			if(input_io >= ANALOG_PORTS)
+				return(reply_error(3));
 
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(mode), &mode));
+			adc_select(&analog_ports[input_io]);
+			adc_warmup	= adc_warmup_init;
+			adc_samples = 0;
+			adc_value	= 0;
+
+			return(reply_char(input_io));
 		}
 
 		case(0xc0):	// read adc
@@ -723,21 +832,18 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 
 			value = adc_read(io);
 
-			put_word(value, replystring);
-
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
+			return(reply_char(input_io));
 		}
 
-		case(0xd0):	// read temperature sensor
+		case(0xe0):	// set temperature sensor calibration values
 		{
-			uint16_t	value;
-			int32_t		calc_value;
-			uint8_t		replystring[2];
+			int32_t value;
 
-			if(io >= TEMP_PORTS)
-				return(build_reply(output_buffer_length, output_buffer, input, 3, 0, 0));
+			if(input_io >= TEMP_PORTS)
+				return(reply_error(3));
 
-			io += ANALOG_PORTS;
+			if(input_buffer_length < 5)
+				return(reply_error(4));
 
 			value = get_word(&input_buffer[1]);
 			eeprom_write_uint16(&eeprom->temp_cal[input_io].multiplier, value);
@@ -762,12 +868,12 @@ static void process_input(uint8_t buffer_size, volatile uint8_t input_buffer_len
 
 			put_word(value, replystring);
 
-			return(build_reply(output_buffer_length, output_buffer, input, 0, sizeof(replystring), replystring));
+			return(reply(0, sizeof(replystring), replystring));
 		}
 
 		default:
 		{
-			return(build_reply(output_buffer_length, output_buffer, input, 2, 0, 0));
+			return(reply_error(2));
 		}
 	}
 
@@ -810,6 +916,8 @@ int main(void)
 {
 	uint8_t slot;
 
+	watchdog_stop();
+
 	cli();
 
 	PRR =		(0 << 7)		|
@@ -829,9 +937,10 @@ int main(void)
 
 	for(slot = 0; slot < INPUT_PORTS; slot++)
 	{
-		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit);
-		*input_ports[slot].ddr			&= ~_BV(input_ports[slot].bit);
-		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit);
+		*input_ports[slot].ddr			|=  _BV(input_ports[slot].bit);	// output
+		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit); // low
+		*input_ports[slot].ddr			&= ~_BV(input_ports[slot].bit);	// input
+		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit); // disable pullup
 		*input_ports[slot].pcmskreg		|=  _BV(input_ports[slot].pcmskbit);
 		GIMSK							|=  _BV(input_ports[slot].gimskbit);
 
@@ -874,12 +983,11 @@ int main(void)
 	timer0_set_compb(0x00);
 	timer0_start();
 
-	// 18 mhz / 32 / 1024 = 549 Hz
+	// 18 mhz / 64 / 1024 = 274 Hz
 	pwm_timer1_init(PWM_TIMER1_PRESCALER_32);
 	pwm_timer1_set_max(0x3ff);
 	pwm_timer1_start();
 
-	usb_running = 0;
 	usbInit();
 	usbDeviceDisconnect();
 
@@ -888,25 +996,25 @@ int main(void)
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
 			*internal_output_ports[slot].port |= _BV(internal_output_ports[slot].bit);
-			_delay_ms(100);
+			_delay_ms(25);
 		}
 
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
 			*internal_output_ports[slot].port &= ~_BV(internal_output_ports[slot].bit);
-			_delay_ms(100);
+			_delay_ms(25);
 		}
 
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
 			*internal_output_ports[slot].port |= _BV(internal_output_ports[slot].bit);
-			_delay_ms(100);
+			_delay_ms(25);
 		}
 
 		for(slot = 0; slot < INTERNAL_OUTPUT_PORTS; slot++)
 		{
 			*internal_output_ports[slot].port &= ~_BV(internal_output_ports[slot].bit);
-			_delay_ms(100);
+			_delay_ms(25);
 		}
 	}
 
@@ -923,38 +1031,18 @@ int main(void)
 
 	for(;;)
 	{
-		static uint8_t ext_sof_count1 = 0, ext_sof_count2 = 0;
-
 		usbPoll();
-
-		if(usbSofCount > 16)
-		{
-			process_pwmmode();
-			ext_sof_count1++;
-			usbSofCount = 0;
-		}
-
-		if(ext_sof_count1 > 4)
-		{
-			usb_running = 1;
-			*internal_output_ports[0].port &= ~_BV(internal_output_ports[0].bit);
-			*internal_output_ports[1].port &= ~_BV(internal_output_ports[1].bit);
-			ext_sof_count2++;
-			ext_sof_count1 = 0;
-		}
-
-		if(ext_sof_count2 > 32)
-		{
-			*internal_output_ports[1].port ^=  _BV(internal_output_ports[1].bit);
-			ext_sof_count2 = 0;
-		}
 
 		if(receive_buffer_complete)
 		{
-			usbDisableAllRequests();
 			process_input(sizeof(send_buffer), receive_buffer_length, receive_buffer, &send_buffer_length, send_buffer);
-			usbEnableAllRequests();
 			receive_buffer_complete	= 0;
+		}
+
+		if(usbSofCount > 0) // 1ms = 1000 Hz
+		{
+			usbSofCount = 0;
+			if_idle();
 		}
 	}
 }
