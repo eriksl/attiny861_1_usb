@@ -46,12 +46,10 @@ LDFLAGS		=		-Wall -mmcu=$(MCU)
 .SUFFIXES:			.c .o .elf .hex
 .PRECIOUS:			.c .h
 
-all:				$(PROGRAMMED) connectusbraw
+all:				$(PROGRAMMED)
 hex:				$(HEXFILE)
 
 $(PROGRAM).o:		$(PROGRAM).c $(HEADERS)
-connectusbraw:		connectusbraw.c
-					gcc -Wall -O2 connectusbraw.c -lusb-1.0 -o connectusbraw
 
 %.o:				%.c
 					@echo "CC $< -> $@"
