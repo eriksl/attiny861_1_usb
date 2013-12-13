@@ -621,9 +621,10 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 				case(0x01):	// read analog input
 				{
 					uint8_t reply_string[6];
+					uint32_t scaled_value = adc_value << 6; // scale 10 bits to 16 bits
 
 					put_word(adc_samples, &reply_string[0]);
-					put_long(adc_value, &reply_string[2]);
+					put_long(scaled_value, &reply_string[2]);
 					adc_warmup	= adc_warmup_init;
 					adc_samples = 0;
 					adc_value	= 0;
