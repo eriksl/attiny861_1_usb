@@ -820,17 +820,18 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			return(reply_char(input_io));
 		}
 
-		case(0xc0):	// read adc
+		case(0xd0):	// select temperature sensor
 		{
-			uint16_t value;
-			uint8_t replystring[2];
+			if(input_io >= TEMP_PORTS)
+				return(reply_error(3));
 
 			adc_select(&temp_ports[input_io]);
 			adc_warmup	= adc_warmup_init;
 			adc_samples = 0;
 			adc_value	= 0;
 
-			value = adc_read(io);
+			temp_cal_multiplier = eeprom_read_uint16(&eeprom->temp_cal[input_io].multiplier);
+			temp_cal_offset		= eeprom_read_uint16(&eeprom->temp_cal[input_io].offset);
 
 			return(reply_char(input_io));
 		}
@@ -848,25 +849,25 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			value = get_word(&input_buffer[1]);
 			eeprom_write_uint16(&eeprom->temp_cal[input_io].multiplier, value);
 
-			if(io == (ANALOG_PORTS + 0)) // TMP36
-			{
-				calc_value	= (int32_t)value;
-				calc_value *= 1000;
-				calc_value /= 961;
-				calc_value -= (500 - 5);
-				value       = (uint16_t)calc_value;
-			}
+			value = get_word(&input_buffer[3]);
+			eeprom_write_uint16(&eeprom->temp_cal[input_io].offset, value);
 
-			if(io == (ANALOG_PORTS + 1)) // internal temp ref
-			{
-				calc_value	 = (int32_t)value;
-				calc_value	 = calc_value - 280;
-				calc_value	*= 1000;
-				calc_value	/= 110;
-				value		 = (uint16_t)calc_value;
-			}
+			return(reply_char(input_io));
+		}
 
-			put_word(value, replystring);
+		case(0xf0):	// read temperature sensor calibration values
+		{
+			int32_t value;
+			uint8_t replystring[4];
+
+			if(input_io >= TEMP_PORTS)
+				return(reply_error(3));
+
+			value = eeprom_read_uint16(&eeprom->temp_cal[input_io].multiplier);
+			put_word(value, &replystring[0]);
+
+			value = eeprom_read_uint16(&eeprom->temp_cal[input_io].offset);
+			put_word(value, &replystring[2]);
 
 			return(reply(0, sizeof(replystring), replystring));
 		}
