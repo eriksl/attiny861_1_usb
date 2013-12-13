@@ -522,58 +522,6 @@ static void reply_ok(void)
 	reply(0, 0, 0);
 }
 
-static void extended_command()
-{
-	struct
-	{
-		uint8_t	amount;
-		uint8_t	data[4];
-	} control_info;
-
-	switch(input_buffer[1])
-	{
-		case(0x00):	// get digital inputs
-		{
-			control_info.amount = INPUT_PORTS;
-			put_long(0x3fffffff, &control_info.data[0]);
-			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
-		}
-
-		case(0x01):	// get analog inputs
-		{
-			control_info.amount = ANALOG_PORTS;
-			put_word(0x0000, &control_info.data[0]);
-			put_word(0x03ff, &control_info.data[2]);
-			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
-		}
-
-		case(0x02):	// get digital outputs
-		{
-			control_info.amount = OUTPUT_PORTS;
-			put_word(0x0000, &control_info.data[0]);
-			put_word(0x00ff, &control_info.data[2]);
-			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
-		}
-
-		case(0x03):	// get pwm outputs
-		{
-			control_info.amount = PWM_PORTS;
-			put_word(0x0000, &control_info.data[0]);
-			put_word(0x03ff, &control_info.data[2]);
-			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
-		}
-
-		case(0x04):	// get temperature sensors
-		{
-			control_info.amount = TEMP_PORTS;
-			put_long(0x00, &control_info.data[0]);
-			return(reply(0, sizeof(control_info), (uint8_t *)&control_info));
-		}
-	}
-
-	return(reply_error(7));
-}
-
 static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, const uint8_t *if_input_buffer,
 						uint8_t *if_output_buffer_length, uint8_t *if_output_buffer)
 {
@@ -603,15 +551,17 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			{
 				case(0x00):	// identify
 				{
-					struct
+					static const struct
 					{
 						uint8_t id1, id2;
 						uint8_t model, version, revision;
+						uint8_t digital_inputs, analog_inputs, digital_outputs, temperature_sensors;
 						uint8_t name[16];
 					} id =
 					{
 						0x4a, 0xfb,
-						0x06, 0x01, 0x05,
+						0x06, 0x01, 0x06,
+						INPUT_PORTS, ANALOG_PORTS, OUTPUT_PORTS, TEMP_PORTS,
 						"attiny861a",
 					};
 
@@ -663,11 +613,6 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 				{
 					for(;;)
 						(void)0;
-				}
-
-				case(0x07): // extended command
-				{
-					return(extended_command());
 				}
 
 				default:
