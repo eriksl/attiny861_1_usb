@@ -85,7 +85,7 @@ $(HEXFILE):			$(ELFFILE)
 
 $(PROGRAMMED):		$(HEXFILE)
 					@echo "AVRDUDE $^"
-					@sh -c "avrdude -vv -c $(PROGRAMMER) -p $(MCU) $(PRGFLAGS) -U flash:w:$^ > $(PROGRAMMED) 2>&1"
+					@avrdude -vv -c $(PROGRAMMER) -p $(MCU) $(PRGFLAGS) -U flash:w:$^ -U lfuse:w:$(LFUSE):m -U hfuse:w:$(HFUSE):m
 
 clean:			
 					@echo "RM $(OBJFILES) $(ELFFILE) $(HEXFILE) $(PROGRAMMED)"
