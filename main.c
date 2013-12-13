@@ -517,6 +517,11 @@ static void reply_error(uint8_t error_code)
 	reply(error_code, 0, 0);
 }
 
+static void reply_ok(void)
+{
+	reply(0, 0, 0);
+}
+
 static void extended_command()
 {
 	struct
@@ -817,7 +822,7 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			adc_samples = 0;
 			adc_value	= 0;
 
-			return(reply_char(input_io));
+			return(reply_ok());
 		}
 
 		case(0xd0):	// select temperature sensor
@@ -833,7 +838,7 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			temp_cal_multiplier = eeprom_read_uint16(&eeprom->temp_cal[input_io].multiplier);
 			temp_cal_offset		= eeprom_read_uint16(&eeprom->temp_cal[input_io].offset);
 
-			return(reply_char(input_io));
+			return(reply_ok());
 		}
 
 		case(0xe0):	// set temperature sensor calibration values
@@ -852,7 +857,7 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			value = get_word(&input_buffer[3]);
 			eeprom_write_uint16(&eeprom->temp_cal[input_io].offset, value);
 
-			return(reply_char(input_io));
+			return(reply_ok());
 		}
 
 		case(0xf0):	// read temperature sensor calibration values
