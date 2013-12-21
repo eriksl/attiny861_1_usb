@@ -27,8 +27,8 @@ ifeq ($(BOARD), 2)
 endif
 
 MCU			=		attiny861
-PROGRAMMER	=		dragon_isp
-PRGFLAGS	=		-b 0 -P usb
+PROGRAMMER	=		dragon_pp
+PRGFLAGS	=		-P usb
 
 PROGRAM		=		main
 OBJFILES	=		adc.o ioports.o timer0.o pwm_timer1.o watchdog.o eeprom.o clock.o v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o $(PROGRAM).o
