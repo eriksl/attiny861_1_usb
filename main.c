@@ -334,6 +334,8 @@ uint8_t usbFunctionWrite(uint8_t *data, uint8_t length)
 	previous_data_token = usbCurrentDataToken;
 #endif
 
+	usbDisableAllRequests();
+
 	if((receive_buffer_length + length) > sizeof(receive_buffer))
 	{
 		receive_buffer_to_fetch = sizeof(receive_buffer);
@@ -856,6 +858,9 @@ int main(void)
 		{
 			usbSofCount = 0;
 			if_idle();
+
+			if(usbAllRequestsAreDisabled())
+				usbEnableAllRequests();
 		}
 	}
 }
