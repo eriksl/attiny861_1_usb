@@ -150,7 +150,7 @@ static void process_pwmmode(void)
 	}
 }
 
-ISR(PCINT_vect)
+ISR(PCINT_vect, ISR_NOBLOCK)
 {
 	static uint8_t pc_dirty, pc_slot;
 
@@ -168,8 +168,6 @@ ISR(PCINT_vect)
 		input_ports[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
 	}
 
-	sei();
-
 	if(pc_dirty)
 	{
 		*internal_output_ports[0].port |= _BV(internal_output_ports[0].bit);
@@ -177,7 +175,7 @@ ISR(PCINT_vect)
 	}
 }
 
-ISR(TIMER0_OVF_vect) // timer 0 softpwm overflow (default normal mode) (244 Hz)
+ISR(TIMER0_OVF_vect, ISR_NOBLOCK) // timer 0 softpwm overflow (default normal mode) (244 Hz)
 {
 	static uint8_t pwm_divisor = 0;
 
@@ -217,18 +215,14 @@ ISR(TIMER0_OVF_vect) // timer 0 softpwm overflow (default normal mode) (244 Hz)
 		input_sense_led--;
 }
 
-ISR(TIMER0_COMPA_vect) // timer 0 softpwm port 1 trigger
+ISR(TIMER0_COMPA_vect, ISR_NOBLOCK) // timer 0 softpwm port 1 trigger
 {
-	sei();
-
 	if(timer0_get_compa() != 0xff)
 		*output_ports[PWM_OUTPUT_PORTS + 0].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 0].bit);
 }
 
-ISR(TIMER0_COMPB_vect) // timer 0 softpwm port 2 trigger
+ISR(TIMER0_COMPB_vect, ISR_NOBLOCK) // timer 0 softpwm port 2 trigger
 {
-	sei();
-
 	if(timer0_get_compb() != 0xff)
 		*output_ports[PWM_OUTPUT_PORTS + 1].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 1].bit);
 }
