@@ -38,7 +38,7 @@ ELFFILE		=		$(PROGRAM).elf
 PROGRAMMED	=		.programmed
 CFLAGS		=		-I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv \
 					--std=c99 -Wall -Winline -Os -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) -DUSE_PLL=$(USE_PLL) -DBOARD=$(BOARD) \
-					-fpack-struct -funroll-loops -funit-at-a-time -fno-keep-static-consts -frename-registers
+					-fpack-struct -funit-at-a-time -fno-keep-static-consts -frename-registers
 LDFLAGS		=		-Wall -mmcu=$(MCU)
 
 .PHONY:				all clean hex
