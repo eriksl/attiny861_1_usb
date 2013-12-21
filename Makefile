@@ -31,14 +31,14 @@ PROGRAMMER	=		dragon_pp
 PRGFLAGS	=		-P usb
 
 PROGRAM		=		main
-OBJFILES	=		adc.o ioports.o timer0.o pwm_timer1.o watchdog.o eeprom.o clock.o v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o $(PROGRAM).o
-HEADERS		=		adc.h ioports.h timer0.h pwm_timer1.h watchdog.h eeprom.h clock.h usbconfig.h v-usb/usbdrv/usbdrv.h v-usb/usbdrv/usbportability.h
+OBJFILES	=		phy.o adc.o ioports.o timer0.o pwm_timer1.o watchdog.o eeprom.o clock.o v-usb/usbdrv/usbdrv.o v-usb/usbdrv/usbdrvasm.o $(PROGRAM).o
+HEADERS		=		phy.h adc.h ioports.h timer0.h pwm_timer1.h watchdog.h eeprom.h clock.h usbconfig.h v-usb/usbdrv/usbdrv.h v-usb/usbdrv/usbportability.h
 HEXFILE		=		$(PROGRAM).hex
 ELFFILE		=		$(PROGRAM).elf
 PROGRAMMED	=		.programmed
 CFLAGS		=		-I$(CURDIR) -I$(CURDIR)/v-usb/usbdrv \
 					--std=c99 -Wall -Winline -Os -mmcu=$(MCU) -DF_CPU=$(MCUSPEED) -DUSE_CRYSTAL=$(USE_CRYSTAL) -DUSE_PLL=$(USE_PLL) -DBOARD=$(BOARD) \
-					-fpack-struct -funit-at-a-time -fno-keep-static-consts -frename-registers
+					-fpack-struct -fno-keep-static-consts -frename-registers
 LDFLAGS		=		-Wall -mmcu=$(MCU)
 
 .PHONY:				all clean hex

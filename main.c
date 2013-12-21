@@ -14,19 +14,14 @@
 #include "timer0.h"
 #include "pwm_timer1.h"
 #include "watchdog.h"
+#include "phy.h"
 
 enum
 {
 	adc_warmup_init = 8,
 	command_led_timeout = 8,
 	if_active_led_timeout = 2,
-	buffer_size = 32
 };
-
-static	uint8_t	const *input_buffer;
-static	uint8_t	input_buffer_length;
-static	uint8_t	*output_buffer;
-static	uint8_t	*output_buffer_length;
 
 static	uint8_t	duty;
 static	uint8_t	init_counter = 0;
@@ -83,15 +78,6 @@ static uint32_t get_long(const uint8_t *from)
 	return(result);
 }
 #endif
-
-static	uint8_t		receive_buffer[buffer_size];
-static	uint8_t		receive_buffer_to_fetch	= 0;
-static	uint8_t		receive_buffer_length	= 0;
-static	uint8_t		receive_buffer_complete	= 0;
-
-static	uint8_t		send_buffer[buffer_size];
-static	uint8_t		send_buffer_sent		= 0;
-static	uint8_t		send_buffer_length		= 0;
 
 static void put_word(uint16_t from, uint8_t *to)
 {
@@ -233,154 +219,26 @@ ISR(TIMER0_COMPB_vect, ISR_NOBLOCK) // timer 0 softpwm port 2 trigger
 		*output_ports[PWM_OUTPUT_PORTS + 1].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 1].bit);
 }
 
-#if (USE_CRYSTAL == 0)
-static void calibrateOscillator(void)
-{
-	uint8_t		step = 128;
-	uint8_t		trialValue = 0, optimumValue;
-	uint16_t	x, optimumDev, targetValue = (unsigned)(1499 * (double)F_CPU / 10.5e6 + 0.5);
-
-	/* do a binary search: */
-
-	cli();
-
-	do
-	{
-		OSCCAL = trialValue + step;
-		x = usbMeasureFrameLength();	// proportional to current real frequency
-		if(x < targetValue)				// frequency still too low
-			trialValue += step;
-		step >>= 1;
-	}
-	while(step > 0);
-
-	/* We have a precision of +/- 1 for optimum OSCCAL here */
-	/* now do a neighborhood search for optimum value */
-
-	optimumValue	= trialValue;
-	optimumDev		= x; // this is certainly far away from optimum
-
-	for(OSCCAL = trialValue - 1; OSCCAL <= trialValue + 1; OSCCAL++)
-	{
-		x = usbMeasureFrameLength() - targetValue;
-
-		if(x < 0)
-			x = -x;
-		if(x < optimumDev)
-		{
-			optimumDev = x;
-			optimumValue = OSCCAL;
-		}
-	}
-
-	OSCCAL = optimumValue;
-
-	sei();
-}
-#else
-static void calibrateOscillator(void)
-{
-}
-#endif
-
-void usbEventResetReady(void)
-{
-	calibrateOscillator();
-}
-
-usbMsgLen_t usbFunctionSetup(uchar data[8])
-{
-	usbRequest_t *rq = (usbRequest_t *)data;
-
-	if((rq->bmRequestType & USBRQ_TYPE_MASK) != USBRQ_TYPE_VENDOR)
-		return(0);
-
-	if((rq->bmRequestType & USBRQ_RCPT_MASK) != USBRQ_RCPT_ENDPOINT)
-		return(0);
-
-	if((rq->bmRequestType & USBRQ_DIR_MASK) == USBRQ_DIR_HOST_TO_DEVICE)
-	{
-		receive_buffer_to_fetch = rq->wLength.word;
-		receive_buffer_length	= 0;
-		receive_buffer_complete	= 0;
-	}
-	else
-		send_buffer_sent		= 0;
-
-	return(USB_NO_MSG);
-}
-
-uint8_t usbFunctionRead(uint8_t *data, uint8_t length)
-{
-	if((send_buffer_sent + length) > send_buffer_length)
-		length = (send_buffer_length - send_buffer_sent);
-
-	if(length > 0)
-	{
-		memcpy(data, send_buffer + send_buffer_sent, length);
-		send_buffer_sent += length;
-	}
-	else
-	{
-		send_buffer_sent	= 0;
-		send_buffer_length	= 0;
-	}
-
-	return(length);
-}
-
-uint8_t usbFunctionWrite(uint8_t *data, uint8_t length)
-{
-#if 0
-	static uint8_t previous_data_token = 0xff;
-
-	if(usbCurrentDataToken == previous_data_token)
-		return(1);
-
-	previous_data_token = usbCurrentDataToken;
-#endif
-
-	usbDisableAllRequests();
-
-	if((receive_buffer_length + length) > sizeof(receive_buffer))
-	{
-		receive_buffer_to_fetch = sizeof(receive_buffer);
-		length = sizeof(receive_buffer) - receive_buffer_length;
-	}
-
-	memcpy(receive_buffer + receive_buffer_length, data, length);
-	receive_buffer_length += length;
-
-	if(receive_buffer_to_fetch >= receive_buffer_length)
-	{
-		receive_buffer_to_fetch = 0;
-		receive_buffer_complete	= 1;
-		return(1);
-	}
-
-	return(0);
-}
-
 static void reply(uint8_t error_code, uint8_t reply_length, const uint8_t *reply_string)
 {
 	uint8_t checksum;
 	uint8_t ix;
 
-	if((reply_length + 4) > buffer_size)
+	if((reply_length + 4) > phy_buffer_size)
 		return;
 
-	output_buffer[0] = 3 + reply_length;
-	output_buffer[1] = error_code;
-	output_buffer[2] = input_byte;
+	phy_send_buffer[0] = 3 + reply_length;
+	phy_send_buffer[1] = error_code;
+	phy_send_buffer[2] = input_byte;
 
 	for(ix = 0; ix < reply_length; ix++)
-		output_buffer[3 + ix] = reply_string[ix];
+		phy_send_buffer[3 + ix] = reply_string[ix];
 
 	for(ix = 1, checksum = 0; ix < (3 + reply_length); ix++)
-		checksum += output_buffer[ix];
+		checksum += phy_send_buffer[ix];
 
-	output_buffer[3 + reply_length] = checksum;
-	*output_buffer_length = 3 + reply_length + 1;
+	phy_send_buffer[3 + reply_length] = checksum;
+	phy_send_buffer_length = 3 + reply_length + 1;
 }
 
 static void reply_char(uint8_t value)
@@ -416,22 +274,15 @@ static void reply_ok(void)
 	return(reply(0, 0, 0));
 }
 
-static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, const uint8_t *if_input_buffer,
-						uint8_t *if_output_buffer_length, uint8_t *if_output_buffer)
+static void process_input()
 {
 	*internal_output_ports[1].port |= _BV(internal_output_ports[1].bit);
 	if_sense_led = command_led_timeout;
 
-	input_buffer_length		= if_input_buffer_length;
-	input_buffer			= if_input_buffer;
-
-	output_buffer_length	= if_output_buffer_length;
-	output_buffer			= if_output_buffer;
-
-	if(input_buffer_length < 1)
+	if(phy_receive_buffer_length < 1)
 		return(reply_error(1));
 
-	input_byte		= input_buffer[0];
+	input_byte		= phy_receive_buffer[0];
 	input_command	= input_byte & 0xf8;
 	input_io		= input_byte & 0x07;
 
@@ -549,7 +400,7 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			uint16_t	value;
 			pwmport_t	*port;
 
-			if(input_buffer_length != 3)
+			if(phy_receive_buffer_length != 3)
 				return(reply_error(4));
 
 			if(input_io >= OUTPUT_PORTS)
@@ -604,8 +455,9 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 		case(0x60): // write output	stepping min_value=uint16/scaled, max_value=uint16/scaled, step=uint16/scaled
 		{
 			uint16_t low;
+			pwmport_t *port;
 
-			if(input_buffer_length != 7)
+			if(phy_receive_buffer_length != 7)
 				return(reply_error(4));
 
 			if(input_io >= OUTPUT_PORTS)
@@ -680,13 +532,13 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			if(input_io >= TEMP_PORTS)
 				return(reply_error(3));
 
-			if(input_buffer_length < 5)
+			if(phy_receive_buffer_length < 5)
 				return(reply_error(4));
 
-			value = get_word(&input_buffer[1]);
+			value = get_word(&phy_receive_buffer[1]);
 			eeprom_write_uint16(&eeprom->temp_cal[input_io].multiplier, value);
 
-			value = get_word(&input_buffer[3]);
+			value = get_word(&phy_receive_buffer[3]);
 			eeprom_write_uint16(&eeprom->temp_cal[input_io].offset, value);
 
 			return(reply_ok());
@@ -862,10 +714,10 @@ int main(void)
 	{
 		usbPoll();
 
-		if(receive_buffer_complete)
+		if(phy_receive_buffer_complete)
 		{
-			process_input(sizeof(send_buffer), receive_buffer_length, receive_buffer, &send_buffer_length, send_buffer);
-			receive_buffer_complete	= 0;
+			process_input();
+			phy_receive_buffer_complete	= 0;
 		}
 
 		if(usbSofCount > 0) // 1ms = 1000 Hz
