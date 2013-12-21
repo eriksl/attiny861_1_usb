@@ -107,29 +107,32 @@ static void put_long(uint32_t from, uint8_t *to)
 	to[3] = (from >>  0) & 0xff;
 }
 
-static void process_pwmmode(void)
+static void process_fading(void)
 {
-	static uint8_t	output_slot;
-	static uint16_t current, low, high, step;
+	static uint8_t		output_index;
+	static pwmport_t*	output_slot;
+	static uint16_t		current, low, high, step;
 
-	for(output_slot = 0; output_slot < OUTPUT_PORTS; output_slot++)
+	for(output_index = 0; output_index < OUTPUT_PORTS; output_index++)
 	{
-		if((step = output_ports[output_slot].step) == 0)
+		output_slot = &output_ports[output_index];
+
+		if((step = output_slot->step) == 0)
 			continue;
 
-		if(!output_ports[output_slot].set)
+		if(!output_slot->set)
 			continue;
 
-		current	= output_ports[output_slot].current;
-		low		= output_ports[output_slot].limit_low;
-		high	= output_ports[output_slot].limit_high;
+		current	= output_slot->current;
+		low		= output_slot->limit_low;
+		high	= output_slot->limit_high;
 
-		if(output_ports[output_slot].direction)								// up
+		if(output_slot->direction)											// up
 		{
 			if(((current + step) < current) || ((current + step) > high))	// wrap or threshold
 			{
 				current = high;
-				output_ports[output_slot].direction = 0;					// down
+				output_slot->direction = 0;									// down
 			}
 			else
 				current += step;
@@ -139,33 +142,36 @@ static void process_pwmmode(void)
 			if(((current - step) > current) || ((current - step) < low))	// wrap or threshold
 			{
 				current = low;
-				output_ports[output_slot].direction = 1;					//up
+				output_slot->direction = 1;									//up
 			}
 			else
 				current -= step;
 		}
 
-		output_ports[output_slot].current = current;
-		output_ports[output_slot].set(current);
+		output_slot->current = current;
+		output_slot->set(current);
 	}
 }
 
 ISR(PCINT_vect, ISR_NOBLOCK)
 {
-	static uint8_t pc_dirty, pc_slot;
+	static uint8_t	pc_dirty, pc_index;
+	static inport_t *input_slot;
 
 	if(init_counter < 16)	// discard spurious first few interrupts
 		return;
 
-	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
+	for(pc_index = 0, pc_dirty = 0; pc_index < INPUT_PORTS; pc_index++)
 	{
-		if((*input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit)) ^ input_ports[pc_slot].state)
+		input_slot = &input_ports[pc_index];
+
+		if((*input_slot->pin & _BV(input_slot->bit)) ^ input_slot->state)
 		{
-			input_ports[pc_slot].counter++;
+			input_slot->counter++;
 			pc_dirty = 1;
 		}
 
-		input_ports[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
+		input_slot->state = *input_slot->pin & _BV(input_slot->bit);
 	}
 
 	if(pc_dirty)
@@ -198,7 +204,7 @@ ISR(TIMER0_OVF_vect, ISR_NOBLOCK) // timer 0 softpwm overflow (default normal mo
 
 	if(++pwm_divisor > 4)
 	{
-		process_pwmmode();
+		process_fading();
 		pwm_divisor = 0;
 	}
 
@@ -540,7 +546,8 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 
 		case(0x40):	// write output static value=uint16/scaled
 		{
-			uint16_t value;
+			uint16_t	value;
+			pwmport_t	*port;
 
 			if(input_buffer_length != 3)
 				return(reply_error(4));
@@ -548,25 +555,27 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			if(input_io >= OUTPUT_PORTS)
 				return(reply_error(3));
 
-			output_ports[input_io].step = 0;
-			value = get_word(&input_buffer[1]);
-			output_ports[input_io].current = output_ports[input_io].limit_high = output_ports[input_io].limit_low = value; // disable stepping
+			port = &output_ports[input_io];
 
-			if(output_ports[input_io].set) // pwm possible
+			port->step = 0;
+			value = get_word(&phy_receive_buffer[1]);
+			port->current = port->limit_high = port->limit_low = value; // disable stepping
+
+			if(port->set) // pwm possible
 			{
-				output_ports[input_io].set(value);
+				port->set(value);
 				if(value == 0)
-					*output_ports[input_io].port &= ~_BV(output_ports[input_io].bit);
+					*port->port &= ~_BV(port->bit);
 				else
 					if(value == 0xffff)
-						*output_ports[input_io].port |=  _BV(output_ports[input_io].bit);
+						*port->port |=  _BV(port->bit);
 			}
 			else
 			{
 				if(value)
-					*output_ports[input_io].port |=  _BV(output_ports[input_io].bit);
+					*port->port |=  _BV(port->bit);
 				else
-					*output_ports[input_io].port &= ~_BV(output_ports[input_io].bit);
+					*port->port &= ~_BV(port->bit);
 			}
 
 			return(reply_ok());
@@ -605,12 +614,14 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			if(!output_ports[input_io].get)
 				return(reply_error(7));
 
-			low = get_word(&input_buffer[1]);
+			port = &output_ports[input_io];
 
-			output_ports[input_io].limit_low	= low;
-			output_ports[input_io].limit_high	= get_word(&input_buffer[3]);
-			output_ports[input_io].current		= low;
-			output_ports[input_io].step			= get_word(&input_buffer[5]);
+			low = get_word(&phy_receive_buffer[1]);
+
+			port->limit_low		= low;
+			port->limit_high	= get_word(&phy_receive_buffer[3]);
+			port->current		= low;
+			port->step			= get_word(&phy_receive_buffer[5]);
 
 			return(reply_ok());
 		}
@@ -618,14 +629,17 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 		case(0x70):	// read output stepping min_value=uint16/scaled, max_value=uint16/scaled, step=uint16/scaled, current uint16/scaled
 		{
 			uint8_t rv[8];
+			pwmport_t *port;
 
 			if(input_io >= OUTPUT_PORTS)
 				return(reply_error(3));
 
-			put_word(output_ports[input_io].limit_low, &rv[0]);
-			put_word(output_ports[input_io].limit_high, &rv[2]);
-			put_word(output_ports[input_io].step, &rv[4]);
-			put_word(output_ports[input_io].current, &rv[6]);
+			port = &output_ports[input_io];
+
+			put_word(port->limit_low, &rv[0]);
+			put_word(port->limit_high, &rv[2]);
+			put_word(port->step, &rv[4]);
+			put_word(port->current, &rv[6]);
 
 			return(reply(0, sizeof(rv), rv));
 		}
