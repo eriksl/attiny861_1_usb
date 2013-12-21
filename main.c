@@ -1,12 +1,12 @@
 #include <stdint.h>
 
-#include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <string.h>
 
 #include "usbdrv.h"
 
+#include "avr.h"
 #include "clock.h"
 #include "eeprom.h"
 #include "ioports.h"

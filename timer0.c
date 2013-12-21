@@ -1,6 +1,5 @@
 #include <stdint.h>
-#include <avr/io.h>
-
+#include "avr.h"
 #include "timer0.h"
 
 static uint8_t cs0[3];

@@ -1,7 +1,7 @@
 #if !defined(_IOPORTS_H_)
 #define _IOPORTS_H_ 1
 #include <stdint.h>
-#include <avr/io.h>
+#include "avr.h"
 
 typedef struct
 {

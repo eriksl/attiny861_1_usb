@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <avr/io.h>
+#include "avr.h"
 
 #include "ioports.h"
 #include "pwm_timer1.h"

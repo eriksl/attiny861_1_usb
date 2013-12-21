@@ -2,7 +2,7 @@
 #define _TIMER0_H_
 
 #include <stdint.h>
-#include <avr/io.h>
+#include "avr.h"
 
 enum
 {
