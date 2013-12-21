@@ -50,7 +50,7 @@ section at the end of this file).
 #define USB_CFG_DPLUS_BIT       0
 #endif
 #if (BOARD == 2)
-#define USB_CFG_DPLUS_BIT       3
+#define USB_CFG_DPLUS_BIT       2
 #endif
 /* This is the bit number in USB_CFG_IOPORT where the USB D+ line is connected.
  * This may be any bit in the port. Please note that D+ must also be connected

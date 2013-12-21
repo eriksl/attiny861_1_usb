@@ -90,3 +90,23 @@ uint8_t timer0_status(void)
 {
 	return((TCCR0B & (_BV(CS02) | _BV(CS01) | _BV(CS00))) >> CS00);
 }
+
+void timer0_set_compa(uint16_t value)
+{
+	OCR0A = value;
+}
+
+uint16_t timer0_get_compa(void)
+{
+	return(OCR0A);
+}
+
+void timer0_set_compb(uint16_t value)
+{
+	OCR0B = value;
+}
+
+uint16_t timer0_get_compb(void)
+{
+	return(OCR0B);
+}

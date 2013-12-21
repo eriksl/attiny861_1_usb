@@ -1,9 +1,98 @@
 #include <stdint.h>
-#include <avr/io.h>
-
+#include "avr.h"
 #include "ioports.h"
 
-const adcport_t temp_ports[TEMP_PORTS] = 
+#if (PWM_OUTPUT_PORTS > 0)
+extern uint16_t	pwm_timer1_get_oc1a(void);
+extern void		pwm_timer1_set_oc1a(uint16_t value); // prevent include loop
+static uint16_t get_pwm_oc1a_16(void)
+{
+	uint16_t raw;
+
+	raw = pwm_timer1_get_oc1a();
+	return((raw << 6) | (raw & 0x003f));
+}
+static void		set_pwm_oc1a_16(uint16_t value)
+{
+	return(pwm_timer1_set_oc1a(value >> 6)); // 16 bits -> 10 bits resolution
+}
+#endif
+
+#if (PWM_OUTPUT_PORTS > 1)
+extern uint16_t	pwm_timer1_get_oc1b(void);
+extern void		pwm_timer1_set_oc1b(uint16_t value);
+static uint16_t get_pwm_oc1b_16(void)
+{
+	uint16_t raw;
+
+	raw = pwm_timer1_get_oc1b();
+	return((raw << 6) | (raw & 0x003f));
+}
+static void		set_pwm_oc1b_16(uint16_t value)
+{
+	return(pwm_timer1_set_oc1b(value >> 6)); // 16 bits -> 10 bits resolution
+}
+#endif
+
+#if (PWM_OUTPUT_PORTS > 2)
+extern uint16_t	pwm_timer1_get_oc1d(void);
+extern void		pwm_timer1_set_oc1d(uint16_t value);
+static uint16_t get_pwm_oc1d_16(void)
+{
+	uint16_t raw;
+
+	raw = pwm_timer1_get_oc1d();
+	return((raw << 4) | (raw & 0x000f));
+}
+static void set_pwm_oc1d_16(uint16_t value)
+{
+	return(pwm_timer1_set_oc1d(value >> 4)); // 16 bits -> 12 bits resolution
+}
+#endif
+
+#if (PLAIN_OUTPUT_PORTS > 0)
+extern uint16_t	timer0_get_compa(void);
+extern void		timer0_set_compa(uint16_t);
+static uint16_t get_timer_0a_16(void)
+{
+	uint16_t raw;
+
+	raw = timer0_get_compa();
+	return((raw << 8) | (raw & 0x00ff)); // 8 bits -> 16 bits resolution
+}
+static void set_timer_0a_16(uint16_t value)
+{
+	value >>= 8;
+
+	if(value < 4)
+		value = 0;
+
+	timer0_set_compa(value);
+}
+#endif
+
+#if (PLAIN_OUTPUT_PORTS > 1)
+extern uint16_t	timer0_get_compb(void);
+extern void		timer0_set_compb(uint16_t);
+static uint16_t get_timer_0b_16(void)
+{
+	uint16_t raw;
+
+	raw = timer0_get_compb();
+	return((raw << 8) | (raw & 0x00ff)); // 8 bits -> 16 bits resolution
+}
+static void set_timer_0b_16(uint16_t value)
+{
+	value >>= 8;
+
+	if(value < 4)
+		value = 0;
+
+	timer0_set_compb(value);
+}
+#endif
+
+adcport_t temp_ports[TEMP_PORTS] = 
 {
 	{							// internal temp sensor
 		{ 1, 1, 1, 1, 1, 1 }	// mux = adc11 = 111111
@@ -14,13 +103,13 @@ const adcport_t temp_ports[TEMP_PORTS] =
 	},
 #endif
 #if (BOARD == 1)
-    {                           // pa4 pin 14 adc input 3
-        { 1, 1, 0, 0, 0, 0 },   // mux = adc3
-    },
+	{							// pa4 pin 14 adc input 3
+		{ 1, 1, 0, 0, 0, 0 },	// mux = adc3
+	},
 #endif
 };
 
-const adcport_t analog_ports[ANALOG_PORTS] = 
+adcport_t analog_ports[ANALOG_PORTS] = 
 {
 #if (BOARD == 0 || BOARD == 1)
 	{							// pa7 pin 11 adc input 1
@@ -29,71 +118,75 @@ const adcport_t analog_ports[ANALOG_PORTS] =
 #endif
 };
 
-const ioport_t input_ports[INPUT_PORTS] =
+inport_t input_ports[INPUT_PORTS] =
 {
 #if (BOARD == 0)
-	{ &PORTA, &PINA, &DDRA, 4, &PCMSK0, PCINT4,  PCIE1 },	// a4	input 1
-	{ &PORTA, &PINA, &DDRA, 5, &PCMSK0, PCINT5,  PCIE1 },	// a5	input 2
-	{ &PORTB, &PINB, &DDRB, 6, &PCMSK1, PCINT14, PCIE1 },	// b6	input 3
+	{ &PORTA, &PINA, &DDRA, 4, &PCMSK0, PCINT4,		PCIE1 },	// a4	input 1
+	{ &PORTA, &PINA, &DDRA, 5, &PCMSK0, PCINT5,		PCIE1 },	// a5	input 2
+	{ &PORTB, &PINB, &DDRB, 6, &PCMSK1, PCINT14,	PCIE1 },	// b6	input 3
 #endif
 #if (BOARD == 1)
-	{ &PORTB, &PINB, &DDRB, 6, &PCMSK1, PCINT14, PCIE1 },	// b6	input 3
-	{ &PORTA, &PINA, &DDRA, 6, &PCMSK0, PCINT6,  PCIE1 },	// a6	input 2
+	{ &PORTB, &PINB, &DDRB, 6, &PCMSK1, PCINT14,	PCIE1 },	// b6	input 3
+	{ &PORTA, &PINA, &DDRA, 6, &PCMSK0, PCINT6,		PCIE1 },	// a6	input 2
 #endif
 };
 
-const ioport_t output_ports[OUTPUT_PORTS] =
+pwmport_t output_ports[OUTPUT_PORTS] =
 {
 #if (BOARD == 0)
-	{ &PORTB, &PINB, &DDRB, 2 }		// b2	output 2
+	{ &PORTB, &DDRB, 1, &get_pwm_oc1a_16,		&set_pwm_oc1a_16	},	// b1	output 1
+	{ &PORTB, &DDRB, 3, &get_pwm_oc1b_16,		&set_pwm_oc1b_16	},	// b3	output 2
+	{ &PORTB, &DDRB, 0, &get_timer_0a_16,		&set_timer_0a_16	},	// b0	output 3
+	{ &PORTB, &DDRB, 2, &get_timer_0b_16,		&set_timer_0b_16	},	// b2	output 4
 #endif
 #if (BOARD == 1)
-	{ &PORTB, &PINB, &DDRB, 0 },	// b0	output 1
+	{ &PORTB, &DDRB, 1,	&get_pwm_oc1a_16,		&set_pwm_oc1a_16	},	// b1	output 1
+	{ &PORTB, &DDRB, 3,	&get_pwm_oc1b_16,		&set_pwm_oc1b_16	},	// b3	output 2
+	{ &PORTB, &DDRB, 5,	&get_pwm_oc1d_16,		&set_pwm_oc1d_16	},	// b5	output 3
+	{ &PORTB, &DDRB, 2,	&get_timer_0a_16,		&set_timer_0a_16	},	// b2	output 4
+	{ &PORTB, &DDRB, 4,	&get_timer_0b_16,		&set_timer_0b_16	},	// b4	output 4
+	{ &PORTA, &DDRA, 3, (uint16_t(*)(void))0,	(void(*)(uint16_t))0},	// a3	output 5
 #endif
 #if (BOARD == 2)
-	{ &PORTA, &PINA, &DDRA, 2, &PCMSK0, PCINT2, PCIE1 },    // a2
-	{ &PORTA, &PINA, &DDRA, 7, &PCMSK0, PCINT7, PCIE1 },    // a7
-	{ &PORTA, &PINA, &DDRA, 6, &PCMSK0, PCINT6, PCIE1 },    // a6
-	{ &PORTA, &PINA, &DDRA, 5, &PCMSK0, PCINT5, PCIE1 },    // a5
+	{ &PORTB, &DDRB, 1,	&get_pwm_oc1a_16,		&set_pwm_oc1a_16	},	// b1	output 1
+	{ &PORTB, &DDRB, 3,	&get_pwm_oc1b_16,		&set_pwm_oc1b_16	},	// b3	output 2
+	{ &PORTA, &DDRA, 2, &get_timer_0a_16,		&set_timer_0a_16	},	// a2	output 3
+	{ &PORTA, &DDRA, 3,	&get_timer_0b_16,		&set_timer_0b_16	},	// a3	output 4
+	{ &PORTA, &DDRA, 4, (uint16_t(*)(void))0,	(void(*)(uint16_t))0},	// a4	output 5
+	{ &PORTA, &DDRA, 5, (uint16_t(*)(void))0,	(void(*)(uint16_t))0},	// a5	output 6
+	{ &PORTA, &DDRA, 6, (uint16_t(*)(void))0,	(void(*)(uint16_t))0},	// a6	output 7
+	{ &PORTA, &DDRA, 7, (uint16_t(*)(void))0,	(void(*)(uint16_t))0},	// a7	output 8
 #endif
 };
 
-const ioport_t usb_ports[USB_PORTS] =
+outport_t usb_ports[USB_PORTS] =
 {
 #if (BOARD == 0)
-	{ &PORTA, &PINA, &DDRA, 2 },	// a2	d-
-	{ &PORTA, &PINA, &DDRA, 1 }		// a1	d+
+	{ &PORTA, &DDRA, 2 },	// a2	d-
+	{ &PORTA, &DDRA, 1 }	// a1	d+
 #endif
 #if (BOARD == 1)
-	{ &PORTA, &PINA, &DDRA, 2 },	// a2	d-
-	{ &PORTA, &PINA, &DDRA, 0 }		// a0	d+
+	{ &PORTA, &DDRA, 2 },	// a2	d-
+	{ &PORTA, &DDRA, 0 }	// a0	d+
 #endif
 #if (BOARD == 2)
-    { &PORTB, &PINB, &DDRB, 6 },    // b6   d-
-    { &PORTB, &PINB, &DDRB, 3 }     // b3   d+
+	{ &PORTB, &DDRB, 6 },	// b6	d-
+	{ &PORTB, &DDRB, 2 }	// b2	d+
 #endif
 };
 
-const ioport_t internal_output_ports[INTERNAL_OUTPUT_PORTS] =
+outport_t internal_output_ports[INTERNAL_OUTPUT_PORTS] =
 {
 #if (BOARD == 0)
-	{ &PORTA, &PINA, &DDRA, 3 },	// a3	input sense
-	{ &PORTA, &PINA, &DDRA, 0 },	// a0	command sense
+	{ &PORTA, &DDRA, 3 },	// a3	input sense
+	{ &PORTA, &DDRA, 0 },	// a0	command sense
 #endif
 #if (BOARD == 1)
-	{ &PORTA, &PINA, &DDRA, 3 },	// a3
-	{ &PORTB, &PINB, &DDRB, 4 },	// b4
+	{ &PORTA, &DDRA, 3 },	// a3
+	{ &PORTB, &DDRB, 4 },	// b4
 #endif
 #if (BOARD == 2)
-	{ &PORTA, &PINA, &DDRA, 0 },    // a0
-	{ &PORTA, &PINA, &DDRA, 1 },    // a1
-#endif
-};
-
-const pwmport_t pwm_ports[PWM_PORTS] =
-{
-#if ((BOARD == 0) || (BOARD == 1))
-	{ &PORTB, &DDRB, 1, &TCCR1A, COM1A1, COM1A0, FOC1A, PWM1A, &TC1H, &OCR1A },	// b1	pwm output 1
-	{ &PORTB, &DDRB, 3, &TCCR1A, COM1B1, COM1B0, FOC1B, PWM1B, &TC1H, &OCR1B },	// b3	pwm output 2
+	{ &PORTA, &DDRA, 0 },	// a0
+	{ &PORTA, &DDRA, 1 },	// a1
 #endif
 };

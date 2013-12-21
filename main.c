@@ -23,34 +23,10 @@ enum
 	buffer_size = 32
 };
 
-typedef enum
-{
-	pwm_mode_none				= 0,
-	pwm_mode_fade_in			= 1,
-	pwm_mode_fade_out			= 2,
-	pwm_mode_fade_in_out_cont	= 3,
-	pwm_mode_fade_out_in_cont	= 4
-} pwm_mode_t;
-
-typedef struct
-{
-	pwm_mode_t	pwm_mode:8;
-} pwm_meta_t;
-
-typedef struct
-{
-	uint32_t	counter;
-	uint8_t		state;
-} counter_meta_t;
-
 static	uint8_t	const *input_buffer;
 static	uint8_t	input_buffer_length;
 static	uint8_t	*output_buffer;
 static	uint8_t	*output_buffer_length;
-
-static	pwm_meta_t		softpwm_meta[OUTPUT_PORTS];
-static	pwm_meta_t		pwm_meta[PWM_PORTS];
-static	counter_meta_t	counter_meta[INPUT_PORTS];
 
 static	uint8_t	duty;
 static	uint8_t	init_counter = 0;
@@ -131,132 +107,46 @@ static void put_long(uint32_t from, uint8_t *to)
 	to[3] = (from >>  0) & 0xff;
 }
 
-static inline void process_pwmmode(void)
+static void process_pwmmode(void)
 {
-	static uint8_t			pm_slot, pm_duty, pm_diff;
-	static uint16_t			pm_duty16, pm_diff16;
+	static uint8_t	output_slot;
+	static uint16_t current, low, high, step;
 
-	for(pm_slot = 0; pm_slot < OUTPUT_PORTS; pm_slot++)
+	for(output_slot = 0; output_slot < OUTPUT_PORTS; output_slot++)
 	{
-		if(pm_slot == 0)
-			pm_duty = timer0_get_compa();
-		else
-			pm_duty = timer0_get_compb();
+		if((step = output_ports[output_slot].step) == 0)
+			continue;
 
-		pm_diff	= pm_duty / 10;
+		if(!output_ports[output_slot].set)
+			continue;
 
-		if(pm_diff < 3)
-			pm_diff = 3;
+		current	= output_ports[output_slot].current;
+		low		= output_ports[output_slot].limit_low;
+		high	= output_ports[output_slot].limit_high;
 
-		switch(softpwm_meta[pm_slot].pwm_mode)
+		if(output_ports[output_slot].direction)								// up
 		{
-			case(pwm_mode_none):
+			if(((current + step) < current) || ((current + step) > high))	// wrap or threshold
 			{
-				break;
+				current = high;
+				output_ports[output_slot].direction = 0;					// down
 			}
-			case(pwm_mode_fade_in):
-			case(pwm_mode_fade_in_out_cont):
-			{
-				if(pm_duty < (255 - pm_diff))
-					pm_duty += pm_diff;
-				else
-				{
-					pm_duty = 255;
-
-					if(softpwm_meta[pm_slot].pwm_mode == pwm_mode_fade_in)
-						softpwm_meta[pm_slot].pwm_mode = pwm_mode_none;
-					else
-						softpwm_meta[pm_slot].pwm_mode = pwm_mode_fade_out_in_cont;
-				}
-
-				if(pm_slot == 0)
-					timer0_set_compa(pm_duty);
-				else
-					timer0_set_compb(pm_duty);
-
-				break;
-			}
-
-			case(pwm_mode_fade_out):
-			case(pwm_mode_fade_out_in_cont):
-			{
-				if(pm_duty > pm_diff)
-					pm_duty -= pm_diff;
-				else
-				{
-					pm_duty = 0;
-
-					if(softpwm_meta[pm_slot].pwm_mode == pwm_mode_fade_out)
-						softpwm_meta[pm_slot].pwm_mode = pwm_mode_none;
-					else
-						softpwm_meta[pm_slot].pwm_mode = pwm_mode_fade_in_out_cont;
-				}
-
-				if(pm_slot == 0)
-					timer0_set_compa(pm_duty);
-				else
-					timer0_set_compb(pm_duty);
-
-				break;
-			}
-		}
-	}
-
-	for(pm_slot = 0; pm_slot < PWM_PORTS; pm_slot++)
-	{
-		pm_duty16	= pwm_timer1_get_pwm(pm_slot);
-		pm_diff16	= pm_duty16 / 8;
-
-		if(pm_diff16 < 8)
-			pm_diff16 = 8;
-
-		switch(pwm_meta[pm_slot].pwm_mode)
+			else
+				current += step;
+		} 
+		else																// down
 		{
-			case(pwm_mode_none):
+			if(((current - step) > current) || ((current - step) < low))	// wrap or threshold
 			{
-				break;
+				current = low;
+				output_ports[output_slot].direction = 1;					//up
 			}
-
-			case(pwm_mode_fade_in):
-			case(pwm_mode_fade_in_out_cont):
-			{
-				if(pm_duty16 < (1020 - pm_diff16))
-					pm_duty16 += pm_diff16;
-				else
-				{
-					pm_duty16 = 1020;
-
-					if(pwm_meta[pm_slot].pwm_mode == pwm_mode_fade_in)
-						pwm_meta[pm_slot].pwm_mode = pwm_mode_none;
-					else
-						pwm_meta[pm_slot].pwm_mode = pwm_mode_fade_out_in_cont;
-				}
-
-				pwm_timer1_set_pwm(pm_slot, pm_duty16);
-
-				break;
-			}
-
-			case(pwm_mode_fade_out):
-			case(pwm_mode_fade_out_in_cont):
-			{
-				if(pm_duty16 > pm_diff16)
-					pm_duty16 -= pm_diff16;
-				else
-				{
-					pm_duty16 = 0;
-
-					if(pwm_meta[pm_slot].pwm_mode == pwm_mode_fade_out)
-						pwm_meta[pm_slot].pwm_mode = pwm_mode_none;
-					else
-						pwm_meta[pm_slot].pwm_mode = pwm_mode_fade_in_out_cont;
-				}
-
-				pwm_timer1_set_pwm(pm_slot, pm_duty16);
-
-				break;
-			}
+			else
+				current -= step;
 		}
+
+		output_ports[output_slot].current = current;
+		output_ports[output_slot].set(current);
 	}
 }
 
@@ -269,13 +159,13 @@ ISR(PCINT_vect)
 
 	for(pc_slot = 0, pc_dirty = 0; pc_slot < INPUT_PORTS; pc_slot++)
 	{
-		if((*input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit)) ^ counter_meta[pc_slot].state)
+		if((*input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit)) ^ input_ports[pc_slot].state)
 		{
-			counter_meta[pc_slot].counter++;
+			input_ports[pc_slot].counter++;
 			pc_dirty = 1;
 		}
 
-		counter_meta[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
+		input_ports[pc_slot].state = *input_ports[pc_slot].pin & _BV(input_ports[pc_slot].bit);
 	}
 
 	sei();
@@ -291,17 +181,19 @@ ISR(TIMER0_OVF_vect) // timer 0 softpwm overflow (default normal mode) (244 Hz)
 {
 	static uint8_t pwm_divisor = 0;
 
-	sei();
-
-	if(timer0_get_compa() == 0)
-		*output_ports[0].port &= ~_BV(output_ports[0].bit);
+#if (PLAIN_OUTPUT_PORTS > 0)
+	if(output_ports[PWM_OUTPUT_PORTS + 0].current == 0)
+		*output_ports[PWM_OUTPUT_PORTS + 0].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 0].bit);
 	else
-		*output_ports[0].port |=  _BV(output_ports[0].bit);
+		*output_ports[PWM_OUTPUT_PORTS + 0].port |=  _BV(output_ports[PWM_OUTPUT_PORTS + 0].bit);
+#endif
 
-	if(timer0_get_compb() == 0)
-		*output_ports[1].port &= ~_BV(output_ports[1].bit);
+#if (PLAIN_OUTPUT_PORTS > 1)
+	if(output_ports[PWM_OUTPUT_PORTS + 1].current == 0)
+		*output_ports[PWM_OUTPUT_PORTS + 1].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 1].bit);
 	else
-		*output_ports[1].port |=  _BV(output_ports[1].bit);
+		*output_ports[PWM_OUTPUT_PORTS + 1].port |=  _BV(output_ports[PWM_OUTPUT_PORTS + 1].bit);
+#endif
 
 	if(init_counter < 255)
 		init_counter++;
@@ -330,7 +222,7 @@ ISR(TIMER0_COMPA_vect) // timer 0 softpwm port 1 trigger
 	sei();
 
 	if(timer0_get_compa() != 0xff)
-		*output_ports[0].port &= ~_BV(output_ports[0].bit);
+		*output_ports[PWM_OUTPUT_PORTS + 0].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 0].bit);
 }
 
 ISR(TIMER0_COMPB_vect) // timer 0 softpwm port 2 trigger
@@ -338,7 +230,7 @@ ISR(TIMER0_COMPB_vect) // timer 0 softpwm port 2 trigger
 	sei();
 
 	if(timer0_get_compb() != 0xff)
-		*output_ports[1].port &= ~_BV(output_ports[1].bit);
+		*output_ports[PWM_OUTPUT_PORTS + 1].port &= ~_BV(output_ports[PWM_OUTPUT_PORTS + 1].bit);
 }
 
 #if (USE_CRYSTAL == 0)
@@ -491,7 +383,7 @@ static void reply(uint8_t error_code, uint8_t reply_length, const uint8_t *reply
 
 static void reply_char(uint8_t value)
 {
-	reply(0, sizeof(value), &value);
+	return(reply(0, sizeof(value), &value));
 }
 
 static void reply_short(uint16_t value)
@@ -500,7 +392,7 @@ static void reply_short(uint16_t value)
 
 	put_word(value, reply_string);
 
-	reply(0, sizeof(reply_string), reply_string);
+	return(reply(0, sizeof(reply_string), reply_string));
 }
 
 static void reply_long(uint32_t value)
@@ -509,17 +401,17 @@ static void reply_long(uint32_t value)
 
 	put_long(value, reply_string);
 
-	reply(0, sizeof(reply_string), reply_string);
+	return(reply(0, sizeof(reply_string), reply_string));
 }
 
 static void reply_error(uint8_t error_code)
 {
-	reply(error_code, 0, 0);
+	return(reply(error_code, 0, 0));
 }
 
 static void reply_ok(void)
 {
-	reply(0, 0, 0);
+	return(reply(0, 0, 0));
 }
 
 static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, const uint8_t *if_input_buffer,
@@ -630,10 +522,10 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			if(input_io >= INPUT_PORTS)
 				return(reply_error(3));
 
-			uint32_t counter = counter_meta[input_io].counter;
+			uint32_t counter = input_ports[input_io].counter;
 
 			if(input_command == 0x20)
-				counter_meta[input_io].counter = 0;
+				input_ports[input_io].counter = 0;
 
 			return(reply_long(counter));
 		}
@@ -816,7 +708,7 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 	return(reply_error(2));
 }
 
-void if_idle(void) // gets called ~1000 Hz
+static inline void if_idle(void) // gets called ~1000 Hz
 {
 	static uint16_t led_divisor = 0;
 
@@ -878,17 +770,15 @@ int main(void)
 		*input_ports[slot].ddr			&= ~_BV(input_ports[slot].bit);	// input
 		*input_ports[slot].port			&= ~_BV(input_ports[slot].bit); // disable pullup
 		*input_ports[slot].pcmskreg		|=  _BV(input_ports[slot].pcmskbit);
+		input_ports[slot].state			=	*input_ports[slot].pin & _BV(input_ports[slot].bit);
+		input_ports[slot].counter		=	0;
 		GIMSK							|=  _BV(input_ports[slot].gimskbit);
-
-		counter_meta[slot].state		= *input_ports[slot].pin & _BV(input_ports[slot].bit);
-		counter_meta[slot].counter		= 0;
 	}
 
 	for(slot = 0; slot < OUTPUT_PORTS; slot++)
 	{
 		*output_ports[slot].ddr		|=  _BV(output_ports[slot].bit);
 		*output_ports[slot].port	&= ~_BV(output_ports[slot].bit);
-		softpwm_meta[slot].pwm_mode	= pwm_mode_none;
 	}
 
 	for(slot = 0; slot < USB_PORTS; slot++)
@@ -902,13 +792,6 @@ int main(void)
 	{
 		*internal_output_ports[slot].ddr	|= _BV(internal_output_ports[slot].bit);
 		*internal_output_ports[slot].port	&= ~_BV(internal_output_ports[slot].bit);
-	}
-
-	for(slot = 0; slot < PWM_PORTS; slot++)
-	{
-		*pwm_ports[slot].ddr 		|=  _BV(pwm_ports[slot].bit);
-		*pwm_ports[slot].port		&= ~_BV(pwm_ports[slot].bit);
-		pwm_meta[slot].pwm_mode		= pwm_mode_none;
 	}
 
 	adc_init();
