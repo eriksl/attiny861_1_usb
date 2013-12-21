@@ -555,13 +555,13 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 					{
 						uint8_t id1, id2;
 						uint8_t model, version, revision;
-						uint8_t digital_inputs, analog_inputs, digital_outputs, temperature_sensors;
-						uint8_t name[16];
+						uint8_t digital_inputs, analog_inputs, temperature_sensors, digital_outputs;
+						uint8_t name[12];
 					} id =
 					{
 						0x4a, 0xfb,
 						0x06, 0x01, 0x06,
-						INPUT_PORTS, ANALOG_PORTS, OUTPUT_PORTS, TEMP_PORTS,
+						INPUT_PORTS, ANALOG_PORTS, TEMP_PORTS, OUTPUT_PORTS,
 						"attiny861a",
 					};
 
@@ -650,112 +650,96 @@ static void process_input(uint8_t buffer_size, uint8_t if_input_buffer_length, c
 			return(reply_char(value));
 		}
 
-		case(0x40):	//	write output / softpwm
-		{
-			uint8_t value;
-
-			if(input_buffer_length < 2)
-				return(reply_error(4));
-
-			if(input_io >= OUTPUT_PORTS)
-				return(reply_error(3));
-
-			value = input_buffer[1];
-
-			if(input_io == 0)
-				timer0_set_compa(value);
-			else
-				timer0_set_compb(value);
-
-			return(reply_char(value));
-		}
-
-		case(0x50):	// read output / softpwm
-		{
-			uint8_t value;
-
-			if(input_io >= OUTPUT_PORTS)
-				return(reply_error(3));
-
-			if(input_io == 0)
-				value = timer0_get_compa();
-			else
-				value = timer0_get_compb();
-
-			return(reply_char(value));
-		}
-
-		case(0x60): // write softpwm mode
-		{
-			if(input_buffer_length < 2)
-				return(reply_error(4));
-
-			if(input_io >= OUTPUT_PORTS)
-				return(reply_error(3));
-
-			if(input_buffer[1] > 3)
-				return(reply_error(3));
-
-			softpwm_meta[input_io].pwm_mode = input_buffer[1];
-
-			return(reply_char(input_buffer[1]));
-		}
-
-		case(0x70):	// read softpwm mode
-		{
-			if(input_io >= OUTPUT_PORTS)
-				return(reply_error(3));
-
-			return(reply_char(softpwm_meta[input_io].pwm_mode));
-		}
-
-		case(0x80): // write pwm
+		case(0x40):	// write output static value=uint16/scaled
 		{
 			uint16_t value;
 
-			if(input_buffer_length < 3)
+			if(input_buffer_length != 3)
 				return(reply_error(4));
 
-			if(input_io >= PWM_PORTS)
+			if(input_io >= OUTPUT_PORTS)
 				return(reply_error(3));
 
+			output_ports[input_io].step = 0;
 			value = get_word(&input_buffer[1]);
+			output_ports[input_io].current = output_ports[input_io].limit_high = output_ports[input_io].limit_low = value; // disable stepping
 
-			pwm_timer1_set_pwm(input_io, value);
+			if(output_ports[input_io].set) // pwm possible
+			{
+				output_ports[input_io].set(value);
+				if(value == 0)
+					*output_ports[input_io].port &= ~_BV(output_ports[input_io].bit);
+				else
+					if(value == 0xffff)
+						*output_ports[input_io].port |=  _BV(output_ports[input_io].bit);
+			}
+			else
+			{
+				if(value)
+					*output_ports[input_io].port |=  _BV(output_ports[input_io].bit);
+				else
+					*output_ports[input_io].port &= ~_BV(output_ports[input_io].bit);
+			}
+
+			return(reply_ok());
+		}
+
+		case(0x50):	// read	output static value=uint16/scaled
+		{
+			uint16_t value;
+
+			if(input_io >= OUTPUT_PORTS)
+				return(reply_error(3));
+
+			if(output_ports[input_io].get) // pwm possible
+				value = output_ports[input_io].get();
+			else
+			{
+				if(*output_ports[input_io].port & _BV(output_ports[input_io].bit))
+					value = 0xffff;
+				else
+					value = 0;
+			}
 
 			return(reply_short(value));
 		}
 
-		case(0x90): // read pwm
+		case(0x60): // write output	stepping min_value=uint16/scaled, max_value=uint16/scaled, step=uint16/scaled
 		{
-			if(input_io >= PWM_PORTS)
-				return(reply_error(3));
+			uint16_t low;
 
-			return(reply_short(pwm_timer1_get_pwm(input_io)));
-		}
-
-		case(0xa0): // write pwm mode
-		{
-			if(input_buffer_length < 2)
+			if(input_buffer_length != 7)
 				return(reply_error(4));
 
-			if(input_io >= PWM_PORTS)
+			if(input_io >= OUTPUT_PORTS)
 				return(reply_error(3));
 
-			if(input_buffer[1] > 3)
-				return(reply_error(3));
+			if(!output_ports[input_io].get)
+				return(reply_error(7));
 
-			pwm_meta[input_io].pwm_mode = input_buffer[1];
+			low = get_word(&input_buffer[1]);
 
-			return(reply_char(input_buffer[1]));
+			output_ports[input_io].limit_low	= low;
+			output_ports[input_io].limit_high	= get_word(&input_buffer[3]);
+			output_ports[input_io].current		= low;
+			output_ports[input_io].step			= get_word(&input_buffer[5]);
+
+			return(reply_ok());
 		}
 
-		case(0xb0):	// read pwm mode
+		case(0x70):	// read output stepping min_value=uint16/scaled, max_value=uint16/scaled, step=uint16/scaled, current uint16/scaled
 		{
-			if(input_io >= PWM_PORTS)
+			uint8_t rv[8];
+
+			if(input_io >= OUTPUT_PORTS)
 				return(reply_error(3));
 
-			return(reply_char(pwm_meta[input_io].pwm_mode));
+			put_word(output_ports[input_io].limit_low, &rv[0]);
+			put_word(output_ports[input_io].limit_high, &rv[2]);
+			put_word(output_ports[input_io].step, &rv[4]);
+			put_word(output_ports[input_io].current, &rv[6]);
+
+			return(reply(0, sizeof(rv), rv));
 		}
 
 		case(0xc0):	// select adc
